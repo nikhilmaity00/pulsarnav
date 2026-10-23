@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="nav_work"
+        android:enabled="true"
+        android:icon="@drawable/ic_cockpit"
+        android:shortcutShortLabel="@string/shortcut_work_short"
+        android:shortcutLongLabel="@string/shortcut_work_long">
+        <intent
+            android:action="com.pulsarnav.action.NAV_WORK"
+            android:targetPackage="com.pulsarnav.app"
+            android:targetClass="com.pulsarnav.app.ui.MainActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="nav_home"
+        android:enabled="true"
+        android:icon="@drawable/ic_cockpit"
+        android:shortcutShortLabel="@string/shortcut_home_short"
+        android:shortcutLongLabel="@string/shortcut_home_long">
+        <intent
+            android:action="com.pulsarnav.action.NAV_HOME"
+            android:targetPackage="com.pulsarnav.app"
+            android:targetClass="com.pulsarnav.app.ui.MainActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="find_bike"
+        android:enabled="true"
+        android:icon="@drawable/ic_garage"
+        android:shortcutShortLabel="@string/shortcut_find_short"
+        android:shortcutLongLabel="@string/shortcut_find_long">
+        <intent
+            android:action="com.pulsarnav.action.FIND_BIKE"
+            android:targetPackage="com.pulsarnav.app"
+            android:targetClass="com.pulsarnav.app.ui.MainActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="log_refuel"
+        android:enabled="true"
+        android:icon="@drawable/ic_garage"
+        android:shortcutShortLabel="@string/shortcut_refuel_short"
+        android:shortcutLongLabel="@string/shortcut_refuel_long">
+        <intent
+            android:action="com.pulsarnav.action.LOG_REFUEL"
+            android:targetPackage="com.pulsarnav.app"
+            android:targetClass="com.pulsarnav.app.ui.MainActivity" />
+    </shortcut>
+
+</shortcuts>

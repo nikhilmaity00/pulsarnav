@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_cockpit"
+        android:icon="@drawable/ic_cockpit"
+        android:title="Cockpit" />
+    <item
+        android:id="@+id/nav_trips"
+        android:icon="@drawable/ic_trips"
+        android:title="Trips" />
+    <item
+        android:id="@+id/nav_garage"
+        android:icon="@drawable/ic_garage"
+        android:title="Garage" />
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="Settings" />
+</menu>

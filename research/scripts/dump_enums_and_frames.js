@@ -1,0 +1,67 @@
+const fs = require("fs");
+const dex = fs.readFileSync("bajaj_gmaps.dex");
+const stringIdsOff = dex.readUInt32LE(0x3c);
+const typeIdsOff = dex.readUInt32LE(0x44);
+const fieldIdsOff = dex.readUInt32LE(0x54);
+const methodIdsOff = dex.readUInt32LE(0x5c);
+const classDefsSize = dex.readUInt32LE(0x60);
+const classDefsOff = dex.readUInt32LE(0x64);
+
+function getString(idx) {
+  let off = dex.readUInt32LE(stringIdsOff + idx * 4);
+  while ((dex.readUInt8(off) & 0x80) !== 0) off++;
+  off++;
+  let end = off;
+  while (dex.readUInt8(end) !== 0) end++;
+  return dex.subarray(off, end).toString("utf8");
+}
+function getTypeName(idx) {
+  return getString(dex.readUInt32LE(typeIdsOff + idx * 4));
+}
+function getMethodName(idx) {
+  const nameIdx = dex.readUInt32LE(methodIdsOff + idx * 8 + 4);
+  const classIdx = dex.readUInt16LE(methodIdsOff + idx * 8);
+  return `${getTypeName(classIdx)}->${getString(nameIdx)}`;
+}
+
+// Search for Alert clinit and CallState clinit
+function dumpMethodCode(codeOff, label) {
+  console.log(`\n--- ${label} (codeOff=${codeOff}) ---`);
+  const insnsSize = dex.readUInt32LE(codeOff + 12);
+  const insnsStart = codeOff + 16;
+  for (let k = 0; k < Math.min(insnsSize, 100); k++) {
+    const op = dex.readUInt8(insnsStart + k * 2);
+    const second = dex.readUInt8(insnsStart + k * 2 + 1);
+    let desc = `0x${k.toString(16).padStart(3, '0')}: [0x${op.toString(16).padStart(2, '0')}]`;
+    if (op === 0x12) {
+      desc += ` const/4 v${second & 0xf}, #${(second >> 4) >= 8 ? (second >> 4) - 16 : (second >> 4)}`;
+    } else if (op === 0x13) {
+      desc += ` const/16 v${second}, #${dex.readInt16LE(insnsStart + (k + 1) * 2)}`;
+      k++;
+    } else if (op === 0x1a) {
+      const s = dex.readUInt16LE(insnsStart + (k + 1) * 2);
+      desc += ` const-string "${getString(s)}"`;
+      k++;
+    } else if (op === 0x70 || op === 0x71 || op === 0x6e) {
+      const mIdx = dex.readUInt16LE(insnsStart + (k + 1) * 2);
+      desc += ` invoke ${getMethodName(mIdx)}`;
+      k += 2;
+    }
+    console.log(desc);
+  }
+}
+
+// Alert <clinit> is 2798656
+dumpMethodCode(2798656, "Alert.<clinit>");
+// CallState <clinit> is 2798900
+dumpMethodCode(2798900, "CallState.<clinit>");
+// CallFrame.alertsForVehicle is 2781124
+dumpMethodCode(2781124, "CallFrame.alertsForVehicle");
+// CallFrame.generalForVehicle is 2781172
+dumpMethodCode(2781172, "CallFrame.generalForVehicle");
+// CallFrame.missedCallForVehicle is 2781220
+dumpMethodCode(2781220, "CallFrame.missedCallForVehicle");
+// CallManager.acceptIncomingCall is 2693136
+dumpMethodCode(2693136, "CallManager.acceptIncomingCall");
+// CallManager.rejectIncomingCall is 2693792
+dumpMethodCode(2693792, "CallManager.rejectIncomingCall");
