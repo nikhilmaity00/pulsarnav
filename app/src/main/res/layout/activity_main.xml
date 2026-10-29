@@ -3808,21 +3808,37 @@
                                 android:gravity="center_vertical"
                                 android:clickable="true"
                                 android:focusable="true"
+                                android:background="?attr/selectableItemBackground"
                                 android:orientation="horizontal">
 
-                                <TextView
+                                <LinearLayout
                                     android:layout_width="0dp"
                                     android:layout_height="wrap_content"
                                     android:layout_weight="1"
-                                    android:text="Days of ownership"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="14sp" />
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Days of ownership"
+                                        android:textColor="@color/text_secondary"
+                                        android:textSize="14sp" />
+
+                                    <TextView
+                                        android:id="@+id/tvPurchaseDateSubtext"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="Purchased: 23 Sep 2023"
+                                        android:textColor="@color/text_tertiary"
+                                        android:textSize="11sp" />
+                                </LinearLayout>
 
                                 <TextView
                                     android:id="@+id/tvDaysOfOwnership"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="1132 Days ✏️"
+                                    android:text="1132 Days 📅"
                                     android:textColor="@color/text_primary"
                                     android:textSize="14sp"
                                     android:textStyle="bold" />

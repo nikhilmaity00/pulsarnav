@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AppSettings(context: Context) {
 
@@ -38,6 +41,7 @@ class AppSettings(context: Context) {
         const val KEY_FUEL_LITERS = "fuel_level_liters"
         const val KEY_LAST_SYNC_MS = "last_synced_timestamp_ms"
         const val KEY_DAYS_OF_OWNERSHIP = "days_of_ownership"
+        const val KEY_PURCHASE_DATE_MS = "bike_purchase_date_ms"
 
         const val KEY_RIDER_BLOOD_GROUP = "rider_blood_group"
         const val KEY_EMERGENCY_CONTACT_NAME = "ice_contact_name"
@@ -224,11 +228,27 @@ class AppSettings(context: Context) {
             prefs.edit().putLong(KEY_LAST_SYNC_MS, value).apply()
         }
 
-    var daysOfOwnership: Int
-        get() = prefs.getInt(KEY_DAYS_OF_OWNERSHIP, 1132)
-        set(value) {
-            prefs.edit().putInt(KEY_DAYS_OF_OWNERSHIP, value).apply()
+    var purchaseDateMs: Long
+        get() {
+            val savedMs = prefs.getLong(KEY_PURCHASE_DATE_MS, 0L)
+            if (savedMs > 0L) return savedMs
+            val legacyDays = prefs.getInt(KEY_DAYS_OF_OWNERSHIP, 1132)
+            val computed = System.currentTimeMillis() - (legacyDays.toLong() * 86400000L)
+            prefs.edit().putLong(KEY_PURCHASE_DATE_MS, computed).apply()
+            return computed
         }
+        set(value) {
+            prefs.edit().putLong(KEY_PURCHASE_DATE_MS, value).apply()
+        }
+
+    val daysOfOwnership: Int
+        get() {
+            val diffMs = (System.currentTimeMillis() - purchaseDateMs).coerceAtLeast(0L)
+            return (diffMs / 86400000L).toInt()
+        }
+
+    val formattedPurchaseDate: String
+        get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(purchaseDateMs))
 
     var riderBloodGroup: String
         get() = prefs.getString(KEY_RIDER_BLOOD_GROUP, "O+ Positive") ?: "O+ Positive"

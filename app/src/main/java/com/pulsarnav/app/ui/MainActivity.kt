@@ -2908,41 +2908,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateOwnershipDays() {
-        binding.tvDaysOfOwnership.text = "${appSettings.daysOfOwnership} Days ✏️"
+        binding.tvDaysOfOwnership.text = "${appSettings.daysOfOwnership} Days 📅"
+        binding.tvPurchaseDateSubtext.text = "Purchased: ${appSettings.formattedPurchaseDate}"
     }
 
     private fun showEditOwnershipDaysDialog() {
-        val input = EditText(this).apply {
-            setText(appSettings.daysOfOwnership.toString())
-            setSelectAllOnFocus(true)
-            hint = "Days of Ownership (e.g. 1132)"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
-            setBackgroundResource(R.drawable.bg_obsidian_input)
-            setPadding(40, 30, 40, 30)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        provideHapticFeedback()
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = appSettings.purchaseDateMs
         }
-        val container = FrameLayout(this).apply {
-            setPadding(50, 20, 50, 10)
-            addView(input)
-        }
+        val year = cal.get(java.util.Calendar.YEAR)
+        val month = cal.get(java.util.Calendar.MONTH)
+        val day = cal.get(java.util.Calendar.DAY_OF_MONTH)
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle("🗓️ Days of Ownership")
-            .setMessage("Update total days elapsed since taking delivery of your Pulsar NS200:")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val days = input.text.toString().toIntOrNull()
-                if (days != null && days >= 0) {
-                    appSettings.daysOfOwnership = days
-                    updateOwnershipDays()
-                    recordSyncTime()
-                    provideHapticFeedback()
-                    Toast.makeText(this, "Ownership duration updated to $days days!", Toast.LENGTH_SHORT).show()
+        val datePicker = android.app.DatePickerDialog(
+            this,
+            { _, selectedYear, selectedMonth, selectedDay ->
+                val newCal = java.util.Calendar.getInstance().apply {
+                    set(selectedYear, selectedMonth, selectedDay, 12, 0, 0)
                 }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+                appSettings.purchaseDateMs = newCal.timeInMillis
+                updateOwnershipDays()
+                recordSyncTime()
+                provideHapticFeedback()
+                Toast.makeText(
+                    this,
+                    "Purchase date set to ${appSettings.formattedPurchaseDate} (${appSettings.daysOfOwnership} days of ownership)",
+                    Toast.LENGTH_LONG
+                ).show()
+            },
+            year,
+            month,
+            day
+        )
+        datePicker.datePicker.maxDate = System.currentTimeMillis()
+        datePicker.setTitle("🗓️ Select Delivery / Purchase Date")
+        datePicker.show()
     }
 
     private fun showAddManualRideDialog() {
