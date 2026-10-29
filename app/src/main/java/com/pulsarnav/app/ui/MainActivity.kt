@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
@@ -264,11 +265,25 @@ class MainActivity : AppCompatActivity() {
         binding.layoutStatsHighlights.visibility = if (isHighlights) View.VISIBLE else View.GONE
         binding.layoutStatsAllRides.visibility = if (isHighlights) View.GONE else View.VISIBLE
 
-        binding.tabStatsHighlights.setBackgroundResource(if (isHighlights) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.tabStatsHighlights.background = getPillChipDrawable(isHighlights, currentTheme)
         binding.tabStatsHighlights.setTextColor(if (isHighlights) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
 
-        binding.tabStatsAllRides.setBackgroundResource(if (!isHighlights) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.tabStatsAllRides.background = getPillChipDrawable(!isHighlights, currentTheme)
         binding.tabStatsAllRides.setTextColor(if (!isHighlights) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+    }
+
+    private fun getPillChipDrawable(active: Boolean, theme: CockpitTheme): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dpToPx(20).toFloat()
+            if (active) {
+                setColor(theme.subtleColor)
+                setStroke(dpToPx(2), theme.accentColor)
+            } else {
+                setColor(theme.cardColor)
+                setStroke(dpToPx(1), theme.cardBorderColor)
+            }
+        }
     }
 
     private fun setupClusterRecalibrate() {
@@ -1821,7 +1836,10 @@ class MainActivity : AppCompatActivity() {
             binding.cardQuickDestinations,
             binding.cardAboutLegal,
             binding.cardMonthSoFar,
-            binding.cardLifetimeStats
+            binding.cardLifetimeStats,
+            binding.cardMetricFuel,
+            binding.cardMetricMileage,
+            binding.cardMetricSpirited
         )
         for (card in contentCards) {
             card.setCardBackgroundColor(theme.cardColor)
@@ -1844,7 +1862,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 5. Cockpit Elements
+        binding.tvTopBarBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvTopBarBadge.setTextColor(theme.accentColor)
+
         binding.tvProjectedRange.setTextColor(theme.accentColor)
+        binding.tvDteSubtext.setTextColor(theme.accentColor)
+        binding.btnQuickEditDte.setTextColor(theme.accentColor)
+        binding.btnRecalibrateCluster.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnRecalibrateCluster.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnRecalibrateCluster.setTextColor(theme.accentColor)
         binding.progressFuelLevel.setIndicatorColor(theme.primaryColor)
         binding.progressFuelLevel.trackColor = theme.cardBorderColor
 
@@ -1865,6 +1891,24 @@ class MainActivity : AppCompatActivity() {
         binding.btnNavigateToBike.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnNavigateToBike.setTextColor(theme.accentColor)
 
+        // Emergency Assistance Card
+        binding.tvEmergencyBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvEmergencyBadge.setTextColor(theme.accentColor)
+        binding.btnEmergencyHospitals.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnEmergencyAmbulance.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnEmergencyAmbulance.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnEmergencyAmbulance.setTextColor(theme.accentColor)
+        binding.tvBloodGroupBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvBloodGroupBadge.setTextColor(theme.accentColor)
+        binding.tvEditMedicalLink.setTextColor(theme.accentColor)
+
+        // Home Lifetime Highlights Banner
+        binding.layoutLifetimeStatsHeader.setBackgroundColor(theme.subtleColor)
+        binding.tvYouTravelledTitle.setTextColor(theme.accentColor)
+        binding.tvLifetimeFuelHome.setTextColor(theme.accentColor)
+        binding.btnViewPreviousRides.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
+        binding.btnViewAllRidingStats.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
+
         // Primary Buttons (Open Google Maps & Scan)
         binding.btnOpenMaps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
         binding.btnOpenMaps.setTextColor(theme.onPrimaryColor)
@@ -1872,6 +1916,9 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnFindPumps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
         binding.btnFindPumps.setTextColor(theme.onPrimaryColor)
+        binding.tvNearbyPumpsSubtext.setTextColor(theme.accentColor)
+        binding.tvTankSpecs.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvTankSpecs.setTextColor(theme.accentColor)
 
         if (bleManager.connectionState.value !is BleConnectionState.Connected) {
             binding.btnScan.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
@@ -1887,13 +1934,31 @@ class MainActivity : AppCompatActivity() {
         binding.tvWhatsAppAlertBanner.setTextColor(theme.accentColor)
 
         // Riding Stats Elements
+        binding.btnBackFromStats.imageTintList = ColorStateList.valueOf(theme.accentColor)
+        binding.tvTodayKmBadge.setTextColor(theme.accentColor)
+        binding.tvHighlightMileage.setTextColor(theme.accentColor)
+        binding.tvHighlightSpiritedRides.setTextColor(theme.accentColor)
         binding.tvHighlightLongestRide.setTextColor(Color.WHITE)
         binding.btnSimulateRide.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.btnSimulateRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnSimulateRide.setTextColor(theme.accentColor)
 
+        binding.tvOdometer.setTextColor(theme.accentColor)
         binding.btnEditOdo.setTextColor(theme.accentColor)
         binding.btnEditOdo.strokeColor = ColorStateList.valueOf(theme.borderColor)
+
+        binding.btnAddManualRide.setTextColor(theme.accentColor)
+        binding.btnAddManualRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
+
+        // Support Tab
+        binding.tvServiceCentersAction.setTextColor(theme.accentColor)
+        binding.tvServiceHistoryAction.setTextColor(theme.accentColor)
+        binding.tvServiceRemaining.setTextColor(theme.accentColor)
+        binding.progressService.setIndicatorColor(theme.primaryColor)
+        binding.progressService.trackColor = theme.cardBorderColor
+        binding.btnMarkServiced.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnMarkServiced.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnMarkServiced.setTextColor(theme.accentColor)
 
         binding.tvChainRemaining.setTextColor(theme.accentColor)
         binding.progressChain.setIndicatorColor(theme.primaryColor)
@@ -1907,17 +1972,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnAddFuel.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnAddFuel.setTextColor(theme.accentColor)
 
-        // Emergency Assistance & Manual Ride Theming
-        binding.tvEmergencyBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvEmergencyBadge.setTextColor(theme.accentColor)
-        binding.btnEmergencyAmbulance.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnEmergencyAmbulance.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnEmergencyAmbulance.setTextColor(theme.accentColor)
-        binding.tvBloodGroupBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvBloodGroupBadge.setTextColor(theme.accentColor)
-        binding.tvEditMedicalLink.setTextColor(theme.accentColor)
-        binding.btnAddManualRide.setTextColor(theme.accentColor)
-        binding.btnAddManualRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        // Account Tab
+        binding.ivProfileAvatar.imageTintList = ColorStateList.valueOf(theme.accentColor)
+        binding.btnEditBikeInfo.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnEditBikeInfo.setTextColor(theme.accentColor)
+        binding.tvDocumentsBadge.setTextColor(theme.accentColor)
 
         binding.btnConfigHome.setTextColor(theme.accentColor)
         binding.btnConfigWork.setTextColor(theme.accentColor)
@@ -1932,6 +1991,9 @@ class MainActivity : AppCompatActivity() {
             btn.strokeColor = ColorStateList.valueOf(theme.borderColor)
             btn.setTextColor(theme.accentColor)
         }
+
+        // Refresh stats tabs pill chips with current theme
+        selectStatsTab(if (binding.layoutStatsHighlights.visibility == View.VISIBLE) binding.tabStatsHighlights else binding.tabStatsAllRides)
 
         // Switches
         val switches = listOf(
@@ -2432,9 +2494,6 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
                         binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
                         binding.layoutDeviceList.visibility = View.VISIBLE
-
-                        binding.tvParkedBanner.text = "Parked • Your Pulsar NS200 is ready to ride • Lets go!"
-                        binding.viewParkedDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                     }
                     is BleConnectionState.Scanning -> {
                         binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
@@ -2462,8 +2521,6 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.setTextColor(currentTheme.accentColor)
                         binding.layoutDeviceList.visibility = View.GONE
 
-                        binding.tvParkedBanner.text = "Connected • Digital Cluster Synced • Ready to Ride!"
-                        binding.viewParkedDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
                         recordSyncTime()
                     }
                     is BleConnectionState.Error -> {

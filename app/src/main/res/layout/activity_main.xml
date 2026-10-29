@@ -74,54 +74,23 @@
                 android:paddingTop="12dp"
                 android:paddingBottom="24dp">
 
-                <!-- Ather-Style Parked Status Banner -->
-                <LinearLayout
-                    android:id="@+id/layoutParkedBanner"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:background="@drawable/bg_ather_banner_parked"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="10dp">
-
-                    <View
-                        android:id="@+id/viewParkedDot"
-                        android:layout_width="10dp"
-                        android:layout_height="10dp"
-                        android:background="@drawable/circle_dot"
-                        android:backgroundTint="#F59E0B" />
-
-                    <TextView
-                        android:id="@+id/tvParkedBanner"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:layout_weight="1"
-                        android:text="Parked • Your Pulsar NS200 is ready to ride • Lets go!"
-                        android:textColor="#FDE68A"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
                 <!-- Ather Hero Range & Fuel Status Card -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardHeroRange"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1.5dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="18dp">
+                        android:padding="@dimen/card_padding">
 
                         <!-- Hero Range Display Header -->
                         <LinearLayout
@@ -204,7 +173,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRecalibrateCluster"
                             android:layout_width="match_parent"
-                            android:layout_height="50dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="12dp"
                             android:backgroundTint="@color/surface_elevated"
                             android:letterSpacing="0.02"
@@ -212,9 +181,9 @@
                             android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:textStyle="bold"
-                            app:cornerRadius="12dp"
+                            app:cornerRadius="@dimen/btn_corner_radius"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
 
                         <View
                             android:layout_width="match_parent"
@@ -273,18 +242,18 @@
                     android:id="@+id/cardConnection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1.5dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <!-- Connectivity Status Row -->
                         <LinearLayout
@@ -327,18 +296,19 @@
                                     android:textSize="11sp" />
                             </LinearLayout>
 
-                            <!-- Glove-Friendly 44dp Scan Button -->
+                            <!-- Glove-Friendly Scan Button -->
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnScan"
                                 android:layout_width="wrap_content"
-                                android:layout_height="44dp"
+                                android:layout_height="@dimen/btn_height_compact"
                                 android:backgroundTint="@color/wine_red"
-                                android:paddingHorizontal="18dp"
+                                android:paddingHorizontal="16dp"
+                                android:paddingVertical="0dp"
                                 android:text="Scan"
                                 android:textColor="@color/on_primary"
                                 android:textSize="12sp"
                                 android:textStyle="bold"
-                                app:cornerRadius="12dp" />
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
                         </LinearLayout>
 
                         <!-- Discovered Bikes List -->
@@ -357,18 +327,18 @@
                             android:layout_marginVertical="14dp"
                             android:background="@color/surface_border_subtle" />
 
-                        <!-- Glove-Friendly Large Primary 62dp Action Button -->
+                        <!-- Glove-Friendly Primary Action Button -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnOpenMaps"
                             android:layout_width="match_parent"
-                            android:layout_height="62dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:backgroundTint="@color/wine_red"
                             android:letterSpacing="0.02"
                             android:text="🗺️  Start Ride with Google Maps"
                             android:textColor="@color/on_primary"
-                            android:textSize="16sp"
+                            android:textSize="15sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp" />
+                            app:cornerRadius="@dimen/btn_corner_radius" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -426,10 +396,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1.5dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -468,10 +438,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1.5dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -510,10 +480,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1.5dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -529,6 +499,7 @@
                                     android:textSize="18sp" />
 
                                 <TextView
+                                    android:id="@+id/tvQuickFuelTitle"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
@@ -546,18 +517,18 @@
                     android:id="@+id/cardLastParked"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -595,20 +566,20 @@
                             android:textSize="14sp"
                             android:textStyle="bold" />
 
-                        <!-- Glove-Friendly 54dp Walking Directions Button -->
+                        <!-- Glove-Friendly Primary Walking Directions Button -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnNavigateToBike"
                             android:layout_width="match_parent"
-                            android:layout_height="54dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="12dp"
                             android:backgroundTint="@color/wine_red_subtle"
                             android:text="🚶  Navigate to Bike (Walking Directions)"
                             android:textColor="@color/wine_red_light"
                             android:textSize="14sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp"
+                            app:cornerRadius="@dimen/btn_corner_radius"
                             app:strokeColor="@color/wine_red_border"
-                            app:strokeWidth="1.5dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -617,18 +588,18 @@
                     android:id="@+id/cardEmergencyHome"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -671,7 +642,7 @@
                                 android:id="@+id/btnEmergencyHospitals"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="0dp"
-                                android:layout_height="52dp"
+                                android:layout_height="@dimen/btn_height_secondary"
                                 android:layout_marginEnd="6dp"
                                 android:layout_weight="1"
                                 android:backgroundTint="@color/surface_elevated"
@@ -679,15 +650,15 @@
                                 android:textColor="@color/text_primary"
                                 android:textSize="12sp"
                                 android:textStyle="bold"
-                                app:cornerRadius="12dp"
+                                app:cornerRadius="@dimen/btn_corner_radius"
                                 app:strokeColor="@color/surface_border_subtle"
-                                app:strokeWidth="1dp" />
+                                app:strokeWidth="@dimen/card_stroke_width" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnEmergencyAmbulance"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="0dp"
-                                android:layout_height="52dp"
+                                android:layout_height="@dimen/btn_height_secondary"
                                 android:layout_marginStart="6dp"
                                 android:layout_weight="1"
                                 android:backgroundTint="@color/wine_red_subtle"
@@ -695,9 +666,9 @@
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="12sp"
                                 android:textStyle="bold"
-                                app:cornerRadius="12dp"
+                                app:cornerRadius="@dimen/btn_corner_radius"
                                 app:strokeColor="@color/wine_red_border"
-                                app:strokeWidth="1.5dp" />
+                                app:strokeWidth="@dimen/card_stroke_width" />
                         </LinearLayout>
 
                         <!-- Rider Medical & ICE Emergency Profile Row (Tap to View/Edit) -->
@@ -975,8 +946,8 @@
                     android:id="@+id/btnViewPreviousRides"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginBottom="12dp"
+                    android:layout_height="@dimen/btn_height_primary"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     android:backgroundTint="@color/surface_card"
                     android:gravity="center_vertical|start"
                     android:paddingHorizontal="16dp"
@@ -984,19 +955,19 @@
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:textStyle="bold"
-                    app:cornerRadius="14dp" />
+                    app:cornerRadius="@dimen/btn_corner_radius" />
 
                 <!-- Ather "Lifetime Stats" Card (With Milestone Progress) -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardLifetimeStatsHome"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1005,15 +976,17 @@
 
                         <!-- Bright Accent Header Banner (like Ather Green) -->
                         <LinearLayout
+                            android:id="@+id/layoutLifetimeStatsHeader"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:background="@color/wine_red_subtle"
                             android:orientation="vertical"
-                            android:paddingHorizontal="18dp"
-                            android:paddingTop="18dp"
+                            android:paddingHorizontal="@dimen/card_padding"
+                            android:paddingTop="@dimen/card_padding"
                             android:paddingBottom="14dp">
 
                             <TextView
+                                android:id="@+id/tvYouTravelledTitle"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="You travelled"
@@ -1137,7 +1110,7 @@
                             android:id="@+id/btnViewAllRidingStats"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:backgroundTint="@color/surface_elevated"
                             android:gravity="center_vertical|start"
                             android:paddingHorizontal="18dp"
@@ -1173,18 +1146,18 @@
                     android:id="@+id/cardNearbyPumps"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1.5dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="18dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -1214,6 +1187,7 @@
                                     android:textStyle="bold" />
 
                                 <TextView
+                                    android:id="@+id/tvNearbyPumpsSubtext"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
@@ -1224,18 +1198,18 @@
                             </LinearLayout>
                         </LinearLayout>
 
-                        <!-- Glove-Friendly 54dp Action Button -->
+                        <!-- Glove-Friendly Primary Action Button -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnFindPumps"
                             android:layout_width="match_parent"
-                            android:layout_height="54dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="14dp"
                             android:backgroundTint="@color/wine_red"
                             android:text="⛽  Find Nearest Fuel Station (Maps 2W)"
                             android:textColor="@color/on_primary"
                             android:textSize="14sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp" />
+                            app:cornerRadius="@dimen/btn_corner_radius" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1244,18 +1218,18 @@
                     android:id="@+id/cardAddFuel"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="18dp">
+                        android:padding="@dimen/card_padding">
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -1277,16 +1251,16 @@
                             android:id="@+id/btnAddFuel"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="14dp"
                             android:backgroundTint="@color/wine_red_subtle"
                             android:text="+  Log Refuel (Litres / Amount)"
                             android:textColor="@color/wine_red_light"
                             android:textSize="14sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp"
+                            app:cornerRadius="@dimen/btn_corner_radius"
                             app:strokeColor="@color/wine_red_border"
-                            app:strokeWidth="1.5dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1295,18 +1269,18 @@
                     android:id="@+id/cardFuelBreakdown"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -1388,6 +1362,7 @@
                                     android:textStyle="bold" />
 
                                 <TextView
+                                    android:id="@+id/tvTankSpecs"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
@@ -1405,12 +1380,12 @@
                     android:id="@+id/cardFuelLog"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1460,21 +1435,21 @@
                     android:id="@+id/cardServiceCenters"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     android:clickable="true"
                     android:focusable="true"
                     android:foreground="?attr/selectableItemBackground"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1.5dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="18dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -1513,6 +1488,7 @@
                             </LinearLayout>
 
                             <TextView
+                                android:id="@+id/tvServiceCentersAction"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Maps →"
@@ -1528,21 +1504,21 @@
                     android:id="@+id/cardServiceHistory"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     android:clickable="true"
                     android:focusable="true"
                     android:foreground="?attr/selectableItemBackground"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1.5dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="18dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -1582,6 +1558,7 @@
                             </LinearLayout>
 
                             <TextView
+                                android:id="@+id/tvServiceHistoryAction"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Edit →"
@@ -1597,18 +1574,18 @@
                     android:id="@+id/cardChainLube"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -1653,20 +1630,20 @@
                             app:trackColor="@color/surface_border"
                             app:trackCornerRadius="4dp" />
 
-                        <!-- Glove-Friendly 52dp Action Button -->
+                        <!-- Glove-Friendly Primary Action Button -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnMarkChainLubed"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="14dp"
                             android:backgroundTint="@color/wine_red_subtle"
                             android:text="✓  Mark Chain Cleaned &amp; Lubed"
                             android:textColor="@color/wine_red_light"
                             android:textSize="13sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp"
+                            app:cornerRadius="@dimen/btn_corner_radius"
                             app:strokeColor="@color/wine_red_border"
-                            app:strokeWidth="1.5dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1675,18 +1652,18 @@
                     android:id="@+id/cardService"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -1731,20 +1708,20 @@
                             app:trackColor="@color/surface_border"
                             app:trackCornerRadius="4dp" />
 
-                        <!-- Glove-Friendly 52dp Action Button -->
+                        <!-- Glove-Friendly Primary Action Button -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnMarkServiced"
                             android:layout_width="match_parent"
-                            android:layout_height="52dp"
+                            android:layout_height="@dimen/btn_height_primary"
                             android:layout_marginTop="14dp"
                             android:backgroundTint="@color/surface_card"
                             android:text="✓  Mark Service Completed"
                             android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:textStyle="bold"
-                            app:cornerRadius="14dp"
+                            app:cornerRadius="@dimen/btn_corner_radius"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1753,12 +1730,12 @@
                     android:id="@+id/cardSupportOptions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1912,21 +1889,22 @@
                     android:id="@+id/cardProfile"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <ImageView
+                            android:id="@+id/ivProfileAvatar"
                             android:layout_width="36dp"
                             android:layout_height="36dp"
                             android:src="@drawable/ic_account"
@@ -1964,19 +1942,19 @@
                     android:id="@+id/cardMyBike"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <ImageView
                             android:layout_width="48dp"
@@ -2041,12 +2019,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -2206,7 +2184,7 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/wine_red_light"
                             app:strokeWidth="2dp">
@@ -2245,10 +2223,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -2284,10 +2262,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -2323,10 +2301,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -2362,10 +2340,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -2400,10 +2378,10 @@
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -2447,18 +2425,18 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <!-- Two-Wheeler / Motorcycle Mode Switch -->
                         <LinearLayout
@@ -2765,18 +2743,18 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -2797,13 +2775,14 @@
                                 android:id="@+id/btnConfigHome"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="44dp"
+                                android:layout_height="@dimen/btn_height_compact"
                                 android:backgroundTint="@color/surface_elevated"
                                 android:paddingHorizontal="16dp"
+                                android:paddingVertical="0dp"
                                 android:text="Set"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp"
-                                app:cornerRadius="12dp" />
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
                         </LinearLayout>
 
                         <View
@@ -2831,13 +2810,14 @@
                                 android:id="@+id/btnConfigWork"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="44dp"
+                                android:layout_height="@dimen/btn_height_compact"
                                 android:backgroundTint="@color/surface_elevated"
                                 android:paddingHorizontal="16dp"
+                                android:paddingVertical="0dp"
                                 android:text="Set"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp"
-                                app:cornerRadius="12dp" />
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -2858,18 +2838,18 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:layout_marginBottom="10dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="18dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -3031,18 +3011,18 @@
                     android:id="@+id/cardCallerId"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="10dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="16dp">
+                        android:padding="@dimen/card_padding">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -3115,7 +3095,7 @@
                         android:id="@+id/btnSimulateCall"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="@dimen/btn_height_secondary"
                         android:layout_marginEnd="4dp"
                         android:layout_weight="1"
                         android:backgroundTint="@color/surface_card"
@@ -3123,15 +3103,15 @@
                         android:textColor="@color/text_primary"
                         android:textSize="13sp"
                         android:textStyle="bold"
-                        app:cornerRadius="12dp"
+                        app:cornerRadius="@dimen/btn_corner_radius"
                         app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp" />
+                        app:strokeWidth="@dimen/card_stroke_width" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSimulateWhatsApp"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="@dimen/btn_height_secondary"
                         android:layout_marginHorizontal="2dp"
                         android:layout_weight="1"
                         android:backgroundTint="@color/surface_card"
@@ -3139,15 +3119,15 @@
                         android:textColor="@color/text_primary"
                         android:textSize="13sp"
                         android:textStyle="bold"
-                        app:cornerRadius="12dp"
+                        app:cornerRadius="@dimen/btn_corner_radius"
                         app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp" />
+                        app:strokeWidth="@dimen/card_stroke_width" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSimulateMissedCall"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="@dimen/btn_height_secondary"
                         android:layout_marginStart="4dp"
                         android:layout_weight="1"
                         android:backgroundTint="@color/surface_card"
@@ -3155,26 +3135,26 @@
                         android:textColor="@color/text_primary"
                         android:textSize="13sp"
                         android:textStyle="bold"
-                        app:cornerRadius="12dp"
+                        app:cornerRadius="@dimen/btn_corner_radius"
                         app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp" />
+                        app:strokeWidth="@dimen/card_stroke_width" />
                 </LinearLayout>
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSimulatePark"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
-                    android:layout_height="50dp"
+                    android:layout_height="@dimen/btn_height_secondary"
                     android:layout_marginTop="10dp"
-                    android:layout_marginBottom="16dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     android:backgroundTint="@color/surface_card"
                     android:text="📍  Simulate Saved Parking Spot"
                     android:textColor="@color/wine_red_light"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    app:cornerRadius="12dp"
+                    app:cornerRadius="@dimen/btn_corner_radius"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp" />
+                    app:strokeWidth="@dimen/card_stroke_width" />
 
                 <!-- About & Legal Compliance -->
                 <TextView
@@ -3191,11 +3171,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
                     app:cardBackgroundColor="@color/surface_card"
-                    app:cardCornerRadius="16dp"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
-                    app:strokeWidth="1dp">
+                    app:strokeWidth="@dimen/card_stroke_width">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -3360,18 +3341,18 @@
                         android:id="@+id/cardMonthSoFar"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
+                        android:layout_marginBottom="@dimen/card_margin_bottom"
                         app:cardBackgroundColor="@color/surface_card"
-                        app:cardCornerRadius="18dp"
+                        app:cardCornerRadius="@dimen/card_corner_radius"
                         app:cardElevation="0dp"
                         app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp">
+                        app:strokeWidth="@dimen/card_stroke_width">
 
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="vertical"
-                            android:padding="18dp">
+                            android:padding="@dimen/card_padding">
 
                             <TextView
                                 android:layout_width="wrap_content"
@@ -3510,19 +3491,20 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
+                        android:layout_marginBottom="@dimen/card_margin_bottom"
                         android:orientation="horizontal">
 
                         <com.google.android.material.card.MaterialCardView
+                            android:id="@+id/cardMetricFuel"
                             android:layout_width="0dp"
                             android:layout_height="90dp"
                             android:layout_marginEnd="4dp"
                             android:layout_weight="1"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -3551,15 +3533,16 @@
                         </com.google.android.material.card.MaterialCardView>
 
                         <com.google.android.material.card.MaterialCardView
+                            android:id="@+id/cardMetricMileage"
                             android:layout_width="0dp"
                             android:layout_height="90dp"
                             android:layout_marginHorizontal="2dp"
                             android:layout_weight="1"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -3588,15 +3571,16 @@
                         </com.google.android.material.card.MaterialCardView>
 
                         <com.google.android.material.card.MaterialCardView
+                            android:id="@+id/cardMetricSpirited"
                             android:layout_width="0dp"
                             android:layout_height="90dp"
                             android:layout_marginStart="4dp"
                             android:layout_weight="1"
                             app:cardBackgroundColor="@color/surface_card"
-                            app:cardCornerRadius="14dp"
+                            app:cardCornerRadius="@dimen/card_corner_radius_small"
                             app:cardElevation="0dp"
                             app:strokeColor="@color/surface_border"
-                            app:strokeWidth="1dp">
+                            app:strokeWidth="@dimen/card_stroke_width">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -3654,7 +3638,7 @@
                                 android:layout_height="140dp"
                                 android:layout_marginEnd="10dp"
                                 app:cardBackgroundColor="#2D2140"
-                                app:cardCornerRadius="18dp"
+                                app:cardCornerRadius="@dimen/card_corner_radius"
                                 app:cardElevation="0dp">
 
                                 <LinearLayout
@@ -3700,7 +3684,7 @@
                                 android:layout_height="140dp"
                                 android:layout_marginEnd="10dp"
                                 app:cardBackgroundColor="#16382B"
-                                app:cardCornerRadius="18dp"
+                                app:cardCornerRadius="@dimen/card_corner_radius"
                                 app:cardElevation="0dp">
 
                                 <LinearLayout
@@ -3745,7 +3729,7 @@
                                 android:layout_width="140dp"
                                 android:layout_height="140dp"
                                 app:cardBackgroundColor="#422812"
-                                app:cardCornerRadius="18dp"
+                                app:cardCornerRadius="@dimen/card_corner_radius"
                                 app:cardElevation="0dp">
 
                                 <LinearLayout
@@ -3791,10 +3775,12 @@
                         android:id="@+id/cardLifetimeStats"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginBottom="@dimen/card_margin_bottom"
                         app:cardBackgroundColor="@color/surface_card"
-                        app:cardCornerRadius="16dp"
+                        app:cardCornerRadius="@dimen/card_corner_radius"
                         app:cardElevation="0dp"
                         app:strokeColor="@color/surface_border"
+                        app:strokeWidth="@dimen/card_stroke_width">
                         app:strokeWidth="1dp">
 
                         <LinearLayout
@@ -3911,13 +3897,13 @@
                                 android:id="@+id/btnEditOdo"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="match_parent"
-                                android:layout_height="44dp"
+                                android:layout_height="@dimen/btn_height_compact"
                                 android:layout_marginTop="14dp"
                                 android:backgroundTint="@color/surface_elevated"
                                 android:text="Edit Lifetime Odometer"
                                 android:textColor="@color/text_primary"
                                 android:textSize="12sp"
-                                app:cornerRadius="12dp" />
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
@@ -3952,14 +3938,14 @@
                             android:id="@+id/btnAddManualRide"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="wrap_content"
-                            android:layout_height="44dp"
+                            android:layout_height="@dimen/btn_height_compact"
                             android:backgroundTint="@color/surface_elevated"
                             android:text="+ Log Past Ride"
                             android:textColor="@color/text_primary"
                             android:textSize="12sp"
-                            app:cornerRadius="10dp"
+                            app:cornerRadius="@dimen/btn_corner_radius_compact"
                             app:strokeColor="@color/surface_border_subtle"
-                            app:strokeWidth="1dp" />
+                            app:strokeWidth="@dimen/card_stroke_width" />
                     </LinearLayout>
 
                     <!-- Ride List Container -->
