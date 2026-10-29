@@ -6,6 +6,19 @@ import com.pulsarnav.app.data.AppSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+data class ServiceRecord(
+    val id: String = UUID.randomUUID().toString(),
+    var date: String,
+    var odoKm: Double,
+    var title: String,
+    var workshop: String = "Bajaj Authorized Service",
+    var notes: String = "",
+    var cost: String = "₹0"
+)
 
 data class MaintenanceStatus(
     val totalOdometerKm: Double,
@@ -29,6 +42,7 @@ class MaintenanceManager private constructor(private val context: Context) {
         private const val KEY_ODO = "odo_total_km"
         private const val KEY_LAST_CHAIN_LUBE = "last_chain_lube_km"
         private const val KEY_LAST_SERVICE = "last_service_km"
+        private const val KEY_SERVICE_HISTORY_JSON = "service_history_json"
 
         @Volatile
         private var instance: MaintenanceManager? = null
@@ -89,5 +103,105 @@ class MaintenanceManager private constructor(private val context: Context) {
         val currentOdo = prefs.getString(KEY_ODO, "120.0")?.toDoubleOrNull() ?: 120.0
         prefs.edit().putString(KEY_LAST_SERVICE, currentOdo.toString()).apply()
         _status.value = computeStatus()
+    }
+
+    fun getServiceHistory(): MutableList<ServiceRecord> {
+        val raw = prefs.getString(KEY_SERVICE_HISTORY_JSON, null)
+        if (raw.isNullOrBlank()) {
+            return mutableListOf(
+                ServiceRecord(
+                    id = "init_1",
+                    date = "15 Jan 2026",
+                    odoKm = 500.0,
+                    title = "1st Free Service (500 km)",
+                    workshop = "Bajaj Authorized Service",
+                    notes = "Engine oil flush, chain adjustment, fastener check",
+                    cost = "₹0"
+                ),
+                ServiceRecord(
+                    id = "init_2",
+                    date = "12 May 2026",
+                    odoKm = 4500.0,
+                    title = "2nd Free Service (4,500 km)",
+                    workshop = "Bajaj Authorized Service",
+                    notes = "Engine oil replacement, oil filter, brake cleaning",
+                    cost = "₹350"
+                ),
+                ServiceRecord(
+                    id = "init_3",
+                    date = "18 Sep 2026",
+                    odoKm = 9500.0,
+                    title = "3rd Free Service (9,500 km)",
+                    workshop = "Bajaj Authorized Service",
+                    notes = "Periodic service, spark plug check, coolant top-up",
+                    cost = "₹420"
+                )
+            )
+        }
+
+        val list = mutableListOf<ServiceRecord>()
+        try {
+            val array = JSONArray(raw)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    ServiceRecord(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        date = obj.optString("date", "Today"),
+                        odoKm = obj.optDouble("odoKm", 0.0),
+                        title = obj.optString("title", "Periodic Service"),
+                        workshop = obj.optString("workshop", "Bajaj Service"),
+                        notes = obj.optString("notes", ""),
+                        cost = obj.optString("cost", "₹0")
+                    )
+                )
+            }
+        } catch (_: Exception) {
+        }
+        return list
+    }
+
+    fun saveServiceHistory(records: List<ServiceRecord>) {
+        val array = JSONArray()
+        for (rec in records) {
+            val obj = JSONObject()
+            obj.put("id", rec.id)
+            obj.put("date", rec.date)
+            obj.put("odoKm", rec.odoKm)
+            obj.put("title", rec.title)
+            obj.put("workshop", rec.workshop)
+            obj.put("notes", rec.notes)
+            obj.put("cost", rec.cost)
+            array.put(obj)
+        }
+        prefs.edit().putString(KEY_SERVICE_HISTORY_JSON, array.toString()).apply()
+        // Check if latest service can update last_service_km
+        val maxServiceOdo = records.maxOfOrNull { it.odoKm } ?: 0.0
+        val currentLastService = prefs.getString(KEY_LAST_SERVICE, "0.0")?.toDoubleOrNull() ?: 0.0
+        if (maxServiceOdo > currentLastService) {
+            prefs.edit().putString(KEY_LAST_SERVICE, maxServiceOdo.toString()).apply()
+        }
+        _status.value = computeStatus()
+    }
+
+    fun addServiceRecord(record: ServiceRecord) {
+        val current = getServiceHistory()
+        current.add(0, record)
+        saveServiceHistory(current)
+    }
+
+    fun updateServiceRecord(record: ServiceRecord) {
+        val current = getServiceHistory()
+        val index = current.indexOfFirst { it.id == record.id }
+        if (index != -1) {
+            current[index] = record
+            saveServiceHistory(current)
+        }
+    }
+
+    fun deleteServiceRecord(id: String) {
+        val current = getServiceHistory()
+        current.removeAll { it.id == id }
+        saveServiceHistory(current)
     }
 }

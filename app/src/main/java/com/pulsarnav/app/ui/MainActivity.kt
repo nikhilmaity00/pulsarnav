@@ -17,8 +17,13 @@ import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -77,7 +82,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mediaControlManager: MediaControlManager
 
     private var currentTheme: CockpitTheme = getThemeDefinition(AppSettings.THEME_WINE_RED)
-    private var currentRidingMode: String = "street"
+
+    private var pendingDocType: String? = null
+    private val documentPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { saveUploadedDocument(it, pendingDocType) }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -120,7 +131,11 @@ class MainActivity : AppCompatActivity() {
         // Setup UI Sections
         setupBottomNavigation()
         setupListeners()
-        setupRidingModes()
+        setupClusterRecalibrate()
+        updateBikeInfoDisplay()
+        updateDocumentsSummary()
+        updateServiceHistorySummary()
+        updateHeroRangeDisplay()
         setupStatsNavigation()
         setupSupportAndAccountDialogs()
         setupFeatureToggles()
@@ -240,51 +255,227 @@ class MainActivity : AppCompatActivity() {
         binding.tabStatsAllRides.setTextColor(if (!isHighlights) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
     }
 
-    private fun setupRidingModes() {
-        binding.chipModeEco.setOnClickListener {
+    private fun setupClusterRecalibrate() {
+        binding.btnRecalibrateCluster.setOnClickListener {
             provideHapticFeedback()
-            selectRidingMode("eco")
+            showClusterRecalibrateDialog()
         }
-        binding.chipModeStreet.setOnClickListener {
+        binding.btnQuickEditDte.setOnClickListener {
             provideHapticFeedback()
-            selectRidingMode("street")
+            showQuickDteEditDialog()
         }
-        binding.chipModeSport.setOnClickListener {
+        binding.layoutProjectedRange.setOnClickListener {
             provideHapticFeedback()
-            selectRidingMode("sport")
+            showQuickDteEditDialog()
         }
-        selectRidingMode("street")
     }
 
-    private fun selectRidingMode(mode: String) {
-        currentRidingMode = mode
-        val isEco = mode == "eco"
-        val isStreet = mode == "street"
-        val isSport = mode == "sport"
+    private fun recordSyncTime() {
+        appSettings.lastSyncedTimestampMs = System.currentTimeMillis()
+        updateSyncTimeDisplay()
+    }
 
-        binding.chipModeEco.setBackgroundResource(if (isEco) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
-        binding.chipModeEco.setTextColor(if (isEco) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
-
-        binding.chipModeStreet.setBackgroundResource(if (isStreet) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
-        binding.chipModeStreet.setTextColor(if (isStreet) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
-
-        binding.chipModeSport.setBackgroundResource(if (isSport) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
-        binding.chipModeSport.setTextColor(if (isSport) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
-
-        updateHeroRangeDisplay()
+    private fun updateSyncTimeDisplay() {
+        val syncMs = appSettings.lastSyncedTimestampMs
+        val elapsedMinutes = ((System.currentTimeMillis() - syncMs) / (60 * 1000)).coerceAtLeast(0)
+        val text = when {
+            elapsedMinutes < 1 -> "Synced just now"
+            elapsedMinutes < 60 -> "Synced ${elapsedMinutes}m ago"
+            else -> {
+                val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                "Synced at ${sdf.format(Date(syncMs))}"
+            }
+        }
+        binding.tvSyncTimeSubtext.text = text
     }
 
     private fun updateHeroRangeDisplay() {
-        val estFuelLiters = 10.2
-        val mileage = when (currentRidingMode) {
-            "eco" -> 38.5
-            "sport" -> 28.0
-            else -> 35.0
-        }
-        val dteKm = (estFuelLiters * mileage).toInt()
+        val dteKm = appSettings.projectedDteKm
+        val fuelPercent = appSettings.fuelLevelPercent
+        val fuelLiters = appSettings.fuelLevelLiters
+
         binding.tvProjectedRange.text = dteKm.toString()
-        binding.tvDteSubtext.text = "~${"%.1f".format(estFuelLiters)}L in tank"
-        binding.tvFuelLevelText.text = "85% Tank Level • ${"%.1f".format(estFuelLiters)}L / 12.0L"
+        binding.tvDteSubtext.text = "~${"%.1f".format(fuelLiters)}L in tank"
+        binding.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${"%.1f".format(fuelLiters)}L / 12.0L"
+        binding.progressFuelLevel.progress = fuelPercent
+
+        updateSyncTimeDisplay()
+    }
+
+    private fun updateBikeInfoDisplay() {
+        binding.tvBikeName.text = appSettings.bikeName
+        binding.tvBikeReg.text = "${appSettings.bikeRegNumber} • ${appSettings.bikeModelSpec}"
+        binding.tvProfileName.text = appSettings.riderName
+    }
+
+    private fun updateDocumentsSummary() {
+        val rc = appSettings.docRcNumber
+        val ins = appSettings.docInsuranceExpiry
+        val puc = appSettings.docPucExpiry
+        val hasRc = appSettings.docRcPath.isNotBlank() && File(appSettings.docRcPath).exists()
+        val hasIns = appSettings.docInsurancePath.isNotBlank() && File(appSettings.docInsurancePath).exists()
+        val hasPuc = appSettings.docPucPath.isNotBlank() && File(appSettings.docPucPath).exists()
+        val uploadedCount = listOf(hasRc, hasIns, hasPuc).count { it }
+
+        binding.tvDocumentsSubtext.text = "RC ($rc) • Ins ($ins) • PUC ($puc)"
+        binding.tvDocumentsBadge.text = if (uploadedCount > 0) "$uploadedCount Uploaded" else "3 Docs"
+    }
+
+    private fun updateServiceHistorySummary() {
+        val count = maintenanceManager.getServiceHistory().size
+        binding.tvServiceHistorySummary.text = "$count services recorded • Tap to view & edit"
+    }
+
+    private fun showQuickDteEditDialog() {
+        val input = EditText(this).apply {
+            setText(appSettings.projectedDteKm.toString())
+            setSelectAllOnFocus(true)
+            hint = "Distance to Empty (km)"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(40, 30, 40, 30)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val container = FrameLayout(this).apply {
+            setPadding(50, 30, 50, 10)
+            addView(input)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("✏️ Edit Distance to Empty (DTE)")
+            .setMessage("Enter the DTE reading currently displayed on your NS200 cluster:")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val dte = input.text.toString().toIntOrNull()
+                if (dte != null && dte >= 0) {
+                    provideHapticFeedback()
+                    appSettings.projectedDteKm = dte
+                    recordSyncTime()
+                    updateHeroRangeDisplay()
+                    Toast.makeText(this, "DTE updated to $dte km", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showClusterRecalibrateDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvInfo = TextView(this).apply {
+            text = "Check your NS200 digital LCD cluster and enter the readings to recalibrate:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvInfo)
+
+        // 1. DTE Input
+        val tvDteLabel = TextView(this).apply {
+            text = "1. Cluster DTE (km):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvDteLabel)
+
+        val etDte = EditText(this).apply {
+            setText(appSettings.projectedDteKm.toString())
+            hint = "e.g. 340"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        layout.addView(etDte)
+
+        // 2. Odometer Input
+        val currentOdo = maintenanceManager.status.value.totalOdometerKm
+        val tvOdoLabel = TextView(this).apply {
+            text = "\n2. Cluster Total Odometer (km):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvOdoLabel)
+
+        val etOdo = EditText(this).apply {
+            setText("%.1f".format(currentOdo))
+            hint = "e.g. 14250.0"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        layout.addView(etOdo)
+
+        // 3. Fuel Bars on Console
+        val tvFuelLabel = TextView(this).apply {
+            text = "\n3. Fuel Gauge Bars on Console:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvFuelLabel)
+
+        val fuelLevels = arrayOf(
+            "6 Bars • Full Tank (100% • 12.0L)",
+            "5 Bars • High (85% • 10.2L)",
+            "4 Bars • Half+ (66% • 8.0L)",
+            "3 Bars • Half Tank (50% • 6.0L)",
+            "2 Bars • Low (33% • 4.0L)",
+            "1 Bar / Blinking • Reserve (16% • 2.0L)"
+        )
+        val spinnerFuel = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, fuelLevels)
+            setSelection(1) // 5 Bars default
+            setPadding(10, 20, 10, 20)
+        }
+        layout.addView(spinnerFuel)
+
+        val scrollView: View = ScrollView(this).apply {
+            addView(layout)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🔄 Recalibrate with Cluster")
+            .setView(scrollView)
+            .setPositiveButton("Sync & Save") { _, _ ->
+                provideHapticFeedback()
+                val enteredDte = etDte.text.toString().toIntOrNull() ?: appSettings.projectedDteKm
+                val enteredOdo = etOdo.text.toString().toDoubleOrNull() ?: currentOdo
+
+                val (percent, liters) = when (spinnerFuel.selectedItemPosition) {
+                    0 -> 100 to 12.0f
+                    1 -> 85 to 10.2f
+                    2 -> 66 to 8.0f
+                    3 -> 50 to 6.0f
+                    4 -> 33 to 4.0f
+                    else -> 16 to 2.0f
+                }
+
+                appSettings.projectedDteKm = enteredDte
+                appSettings.fuelLevelPercent = percent
+                appSettings.fuelLevelLiters = liters
+                maintenanceManager.setOdometer(enteredOdo)
+                recordSyncTime()
+
+                updateHeroRangeDisplay()
+
+                Toast.makeText(
+                    this,
+                    "Cluster synced: $enteredDte km DTE • ${"%.1f".format(enteredOdo)} km ODO",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun setupStatsNavigation() {
@@ -445,6 +636,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnMarkChainLubed.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markChainLubed()
+            recordSyncTime()
             Toast.makeText(this, "Chain marked cleaned & lubed (500 km reset)", Toast.LENGTH_SHORT).show()
         }
 
@@ -452,6 +644,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnMarkServiced.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markServiceDone()
+            recordSyncTime()
             Toast.makeText(this, "Service interval reset to 5,000 km", Toast.LENGTH_SHORT).show()
         }
 
@@ -500,7 +693,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSupportAndAccountDialogs() {
-        // Book Service & Service Centers -> Launch Maps search for Bajaj Service Center
+        // Bajaj Authorized Service Centers -> Launch Maps search for Bajaj Service Center
         val openBajajService = View.OnClickListener {
             provideHapticFeedback()
             try {
@@ -513,10 +706,9 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com?q=Bajaj+service+center")))
             }
         }
-        binding.btnBookService.setOnClickListener(openBajajService)
         binding.cardServiceCenters.setOnClickListener(openBajajService)
 
-        // Service History Dialog
+        // Service History Dialog (Editable)
         binding.cardServiceHistory.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
@@ -546,27 +738,712 @@ class MainActivity : AppCompatActivity() {
             showTrueHealthDialog()
         }
 
-        // Digital Glovebox Documents
+        // Digital Glovebox Documents & Uploads
         binding.rowDocuments.setOnClickListener {
             provideHapticFeedback()
             showDocumentsDialog()
         }
+
+        // Edit Motorcycle Info
+        binding.cardMyBike.setOnClickListener {
+            provideHapticFeedback()
+            showEditBikeInfoDialog()
+        }
+        binding.btnEditBikeInfo.setOnClickListener {
+            provideHapticFeedback()
+            showEditBikeInfoDialog()
+        }
+
+        // Edit Rider Profile
+        binding.cardProfile.setOnClickListener {
+            provideHapticFeedback()
+            showEditRiderProfileDialog()
+        }
+    }
+
+    private fun showEditBikeInfoDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvInfo = TextView(this).apply {
+            text = "Edit your motorcycle registration and specs:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvInfo)
+
+        // Bike Name
+        val tvNameLabel = TextView(this).apply {
+            text = "Motorcycle Name / Nickname:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvNameLabel)
+
+        val etName = EditText(this).apply {
+            setText(appSettings.bikeName)
+            hint = "e.g. Nikhil's Pulsar NS200"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etName)
+
+        // Registration Number (Plate)
+        val tvRegLabel = TextView(this).apply {
+            text = "\nRegistration Number (Plate):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvRegLabel)
+
+        val etReg = EditText(this).apply {
+            setText(appSettings.bikeRegNumber)
+            hint = "e.g. MH02GC2593"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etReg)
+
+        // Model / Spec
+        val tvSpecLabel = TextView(this).apply {
+            text = "\nModel & Spec Details:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvSpecLabel)
+
+        val etSpec = EditText(this).apply {
+            setText(appSettings.bikeModelSpec)
+            hint = "e.g. BS6 DTS-i 4V Liquid-Cooled"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etSpec)
+
+        val scrollView: View = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🏍️ Edit Motorcycle Details")
+            .setView(scrollView)
+            .setPositiveButton("Save") { _, _ ->
+                val name = etName.text.toString().trim()
+                val reg = etReg.text.toString().trim()
+                val spec = etSpec.text.toString().trim()
+
+                if (name.isNotBlank()) appSettings.bikeName = name
+                if (reg.isNotBlank()) {
+                    appSettings.bikeRegNumber = reg
+                    appSettings.docRcNumber = reg
+                }
+                if (spec.isNotBlank()) appSettings.bikeModelSpec = spec
+
+                updateBikeInfoDisplay()
+                updateDocumentsSummary()
+                recordSyncTime()
+                Toast.makeText(this, "Motorcycle details updated!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showEditRiderProfileDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvInfo = TextView(this).apply {
+            text = "Edit your rider profile name and contact number:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvInfo)
+
+        val tvNameLabel = TextView(this).apply {
+            text = "Rider Name:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvNameLabel)
+
+        val etName = EditText(this).apply {
+            setText(appSettings.riderName)
+            hint = "e.g. Nikhil Maity"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etName)
+
+        val tvPhoneLabel = TextView(this).apply {
+            text = "\nPhone Number:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvPhoneLabel)
+
+        val etPhone = EditText(this).apply {
+            setText(appSettings.riderPhone)
+            hint = "e.g. +91 98765 43210"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+        layout.addView(etPhone)
+
+        val scrollView: View = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("👤 Edit Rider Profile")
+            .setView(scrollView)
+            .setPositiveButton("Save") { _, _ ->
+                val name = etName.text.toString().trim()
+                val phone = etPhone.text.toString().trim()
+
+                if (name.isNotBlank()) appSettings.riderName = name
+                if (phone.isNotBlank()) appSettings.riderPhone = phone
+
+                updateBikeInfoDisplay()
+                recordSyncTime()
+                Toast.makeText(this, "Profile updated!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showServiceHistoryDialog() {
+        val records = maintenanceManager.getServiceHistory()
         val odo = maintenanceManager.status.value.totalOdometerKm
-        MaterialAlertDialogBuilder(this)
-            .setTitle("📄 Service & Maintenance Records")
-            .setMessage(
-                "• 1st Free Service (500 km): Completed\n" +
-                "• 2nd Free Service (4,500 km): Completed\n" +
-                "• 3rd Free Service (9,500 km): Completed\n" +
-                "• DTS-i Synthetic Oil Flush: Active\n" +
-                "• Drive Chain Slack: OK (Cleaned & Lubed)\n" +
-                "• Next Periodic Service: Due at %.0f km".format(odo + maintenanceManager.status.value.serviceRemainingKm)
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 10)
+        }
+
+        val tvSummary = TextView(this).apply {
+            text = "Total Services: ${records.size} • Next Due at %.0f km\nTap any record below to edit or delete:".format(
+                odo + maintenanceManager.status.value.serviceRemainingKm
             )
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvSummary)
+
+        for (rec in records) {
+            val card = com.google.android.material.card.MaterialCardView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 0, 0, 20)
+                }
+                setCardBackgroundColor(currentTheme.cardColor)
+                strokeColor = currentTheme.cardBorderColor
+                strokeWidth = dpToPx(1)
+                radius = dpToPx(12).toFloat()
+            }
+
+            val cardContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(30, 24, 30, 24)
+            }
+
+            val rowTop = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+
+            val tvTitle = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                text = rec.title
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                textSize = 14f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+            rowTop.addView(tvTitle)
+
+            val tvCost = TextView(this).apply {
+                text = rec.cost
+                setTextColor(currentTheme.accentColor)
+                textSize = 13f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+            rowTop.addView(tvCost)
+            cardContent.addView(rowTop)
+
+            val tvMeta = TextView(this).apply {
+                text = "📅 ${rec.date} • 🛵 ${rec.odoKm} km • 🏢 ${rec.workshop}"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 11f
+                setPadding(0, 6, 0, 6)
+            }
+            cardContent.addView(tvMeta)
+
+            if (rec.notes.isNotBlank()) {
+                val tvNotes = TextView(this).apply {
+                    text = "📝 ${rec.notes}"
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                    textSize = 12f
+                }
+                cardContent.addView(tvNotes)
+            }
+
+            val rowActions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.END
+                setPadding(0, 10, 0, 0)
+            }
+
+            val btnEdit = MaterialButton(this).apply {
+                text = "✏️ Edit"
+                textSize = 11f
+                setTextColor(currentTheme.accentColor)
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setOnClickListener {
+                    provideHapticFeedback()
+                    showAddOrEditServiceRecordDialog(rec)
+                }
+            }
+            rowActions.addView(btnEdit)
+
+            val btnDelete = MaterialButton(this).apply {
+                text = "🗑️ Delete"
+                textSize = 11f
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.wine_red_light))
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setOnClickListener {
+                    provideHapticFeedback()
+                    maintenanceManager.deleteServiceRecord(rec.id)
+                    recordSyncTime()
+                    updateServiceHistorySummary()
+                    Toast.makeText(this@MainActivity, "Record deleted", Toast.LENGTH_SHORT).show()
+                    showServiceHistoryDialog() // refresh dialog
+                }
+            }
+            rowActions.addView(btnDelete)
+
+            cardContent.addView(rowActions)
+            card.addView(cardContent)
+            layout.addView(card)
+        }
+
+        val scrollView: View = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📄 Service History & Records")
+            .setView(scrollView)
+            .setPositiveButton("➕ Add Service Record") { _, _ ->
+                provideHapticFeedback()
+                showAddOrEditServiceRecordDialog(null)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showAddOrEditServiceRecordDialog(existing: com.pulsarnav.app.maintenance.ServiceRecord?) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val isEdit = existing != null
+
+        // Title
+        val tvTitleLabel = TextView(this).apply {
+            text = "Service Title / Type:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvTitleLabel)
+
+        val etTitle = EditText(this).apply {
+            setText(existing?.title ?: "Periodic Maintenance")
+            hint = "e.g. 4th Paid Service, Synthetic Oil Flush"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etTitle)
+
+        // Date
+        val tvDateLabel = TextView(this).apply {
+            text = "\nService Date:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvDateLabel)
+
+        val etDate = EditText(this).apply {
+            val today = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+            setText(existing?.date ?: today)
+            hint = "e.g. 29 Oct 2026"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etDate)
+
+        // Odometer
+        val currentOdo = maintenanceManager.status.value.totalOdometerKm
+        val tvOdoLabel = TextView(this).apply {
+            text = "\nOdometer Reading (km):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvOdoLabel)
+
+        val etOdo = EditText(this).apply {
+            setText(if (isEdit) "%.1f".format(existing!!.odoKm) else "%.1f".format(currentOdo))
+            hint = "e.g. 14250.0"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        layout.addView(etOdo)
+
+        // Workshop
+        val tvWorkshopLabel = TextView(this).apply {
+            text = "\nWorkshop / Service Center:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvWorkshopLabel)
+
+        val etWorkshop = EditText(this).apply {
+            setText(existing?.workshop ?: "Bajaj Authorized Service")
+            hint = "e.g. Bajaj Authorized Service"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etWorkshop)
+
+        // Cost
+        val tvCostLabel = TextView(this).apply {
+            text = "\nTotal Bill Cost (₹):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvCostLabel)
+
+        val etCost = EditText(this).apply {
+            setText(existing?.cost ?: "₹0")
+            hint = "e.g. ₹550"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etCost)
+
+        // Notes
+        val tvNotesLabel = TextView(this).apply {
+            text = "\nService Notes & Parts Replaced:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvNotesLabel)
+
+        val etNotes = EditText(this).apply {
+            setText(existing?.notes ?: "")
+            hint = "e.g. Synthetic oil replaced, chain slack adjusted, air filter cleaned"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etNotes)
+
+        val scrollView: View = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(if (isEdit) "✏️ Edit Service Record" else "➕ Add Service Record")
+            .setView(scrollView)
+            .setPositiveButton("Save Record") { _, _ ->
+                val title = etTitle.text.toString().trim()
+                val date = etDate.text.toString().trim()
+                val odoVal = etOdo.text.toString().toDoubleOrNull() ?: currentOdo
+                val workshop = etWorkshop.text.toString().trim()
+                val cost = etCost.text.toString().trim()
+                val notes = etNotes.text.toString().trim()
+
+                val rec = existing?.copy(
+                    title = if (title.isNotBlank()) title else "Periodic Service",
+                    date = if (date.isNotBlank()) date else "Today",
+                    odoKm = odoVal,
+                    workshop = if (workshop.isNotBlank()) workshop else "Bajaj Service",
+                    cost = if (cost.isNotBlank()) cost else "₹0",
+                    notes = notes
+                ) ?: com.pulsarnav.app.maintenance.ServiceRecord(
+                    title = if (title.isNotBlank()) title else "Periodic Service",
+                    date = if (date.isNotBlank()) date else "Today",
+                    odoKm = odoVal,
+                    workshop = if (workshop.isNotBlank()) workshop else "Bajaj Service",
+                    cost = if (cost.isNotBlank()) cost else "₹0",
+                    notes = notes
+                )
+
+                if (isEdit) {
+                    maintenanceManager.updateServiceRecord(rec)
+                } else {
+                    maintenanceManager.addServiceRecord(rec)
+                }
+
+                recordSyncTime()
+                updateServiceHistorySummary()
+                Toast.makeText(this, "Service record saved!", Toast.LENGTH_SHORT).show()
+                showServiceHistoryDialog()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showDocumentsDialog() {
+        val hasRcFile = appSettings.docRcPath.isNotBlank() && File(appSettings.docRcPath).exists()
+        val hasInsFile = appSettings.docInsurancePath.isNotBlank() && File(appSettings.docInsurancePath).exists()
+        val hasPucFile = appSettings.docPucPath.isNotBlank() && File(appSettings.docPucPath).exists()
+
+        val items = arrayOf(
+            "🏍️ Registration Certificate (RC)\n   Number: ${appSettings.docRcNumber}\n   File: ${if (hasRcFile) "📎 Attached (Tap to manage)" else "⚠️ No file uploaded"}",
+            "🛡️ Comprehensive Insurance\n   Policy: ${appSettings.docInsurancePolicy}\n   Expiry: ${appSettings.docInsuranceExpiry}\n   File: ${if (hasInsFile) "📎 Attached (Tap to manage)" else "⚠️ No file uploaded"}",
+            "💨 Pollution Under Control (PUC)\n   Cert: ${appSettings.docPucCert}\n   Expiry: ${appSettings.docPucExpiry}\n   File: ${if (hasPucFile) "📎 Attached (Tap to manage)" else "⚠️ No file uploaded"}"
+        )
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📄 Digital Glovebox Documents")
+            .setItems(items) { _, which ->
+                provideHapticFeedback()
+                when (which) {
+                    0 -> showDocumentActionDialog("rc", "Registration Certificate (RC)", appSettings.docRcNumber, null, appSettings.docRcPath)
+                    1 -> showDocumentActionDialog("insurance", "Comprehensive Insurance", appSettings.docInsurancePolicy, appSettings.docInsuranceExpiry, appSettings.docInsurancePath)
+                    2 -> showDocumentActionDialog("puc", "Pollution Under Control (PUC)", appSettings.docPucCert, appSettings.docPucExpiry, appSettings.docPucPath)
+                }
+            }
             .setPositiveButton("Close", null)
             .show()
+    }
+
+    private fun showDocumentActionDialog(
+        docType: String,
+        title: String,
+        numberOrPolicy: String,
+        expiry: String?,
+        filePath: String
+    ) {
+        val hasFile = filePath.isNotBlank() && File(filePath).exists()
+        val options = mutableListOf<String>()
+        options.add("✏️ Edit Details & Expiry Dates")
+        options.add("📎 Upload / Replace Document (Image/PDF)")
+        if (hasFile) {
+            options.add("👁️ View Uploaded Document")
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setItems(options.toTypedArray()) { _, which ->
+                provideHapticFeedback()
+                when (which) {
+                    0 -> showEditDocumentDetailsDialog(docType, title, numberOrPolicy, expiry)
+                    1 -> {
+                        pendingDocType = docType
+                        try {
+                            documentPicker.launch(arrayOf("image/*", "application/pdf"))
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "Could not open file picker: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    2 -> {
+                        if (hasFile) viewDocument(filePath, title)
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showEditDocumentDetailsDialog(
+        docType: String,
+        title: String,
+        currentNum: String,
+        currentExpiry: String?
+    ) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvNumLabel = TextView(this).apply {
+            text = if (docType == "insurance") "Policy Name / Number:" else "Document / Plate Number:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        layout.addView(tvNumLabel)
+
+        val etNum = EditText(this).apply {
+            setText(numberOrPolicy(docType))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(30, 24, 30, 24)
+        }
+        layout.addView(etNum)
+
+        val etExpiry = if (expiryRequired(docType)) {
+            val tvExpLabel = TextView(this).apply {
+                text = "\nExpiry Date:"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                textSize = 13f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+            layout.addView(tvExpLabel)
+
+            val et = EditText(this).apply {
+                setText(currentExpiry ?: "")
+                hint = "e.g. 15 Nov 2027"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                setBackgroundResource(R.drawable.bg_obsidian_input)
+                setPadding(30, 24, 30, 24)
+            }
+            layout.addView(et)
+            et
+        } else null
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("✏️ Edit $title")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+                val newNum = etNum.text.toString().trim()
+                val newExp = etExpiry?.text?.toString()?.trim()
+
+                when (docType) {
+                    "rc" -> {
+                        if (newNum.isNotBlank()) {
+                            appSettings.docRcNumber = newNum
+                            appSettings.bikeRegNumber = newNum
+                        }
+                    }
+                    "insurance" -> {
+                        if (newNum.isNotBlank()) appSettings.docInsurancePolicy = newNum
+                        if (!newExp.isNullOrBlank()) appSettings.docInsuranceExpiry = newExp
+                    }
+                    "puc" -> {
+                        if (newNum.isNotBlank()) appSettings.docPucCert = newNum
+                        if (!newExp.isNullOrBlank()) appSettings.docPucExpiry = newExp
+                    }
+                }
+
+                updateDocumentsSummary()
+                updateBikeInfoDisplay()
+                recordSyncTime()
+                Toast.makeText(this, "$title updated!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun numberOrPolicy(docType: String): String {
+        return when (docType) {
+            "rc" -> appSettings.docRcNumber
+            "insurance" -> appSettings.docInsurancePolicy
+            else -> appSettings.docPucCert
+        }
+    }
+
+    private fun expiryRequired(docType: String): Boolean {
+        return docType == "insurance" || docType == "puc"
+    }
+
+    private fun saveUploadedDocument(uri: Uri, docType: String?) {
+        if (docType == null) return
+        try {
+            val contentResolver = contentResolver
+            val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+            val extension = if (mime.contains("pdf")) "pdf" else "jpg"
+            val docsDir = File(filesDir, "documents")
+            if (!docsDir.exists()) docsDir.mkdirs()
+            val targetFile = File(docsDir, "${docType}_${System.currentTimeMillis()}.$extension")
+
+            contentResolver.openInputStream(uri)?.use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            when (docType) {
+                "rc" -> appSettings.docRcPath = targetFile.absolutePath
+                "insurance" -> appSettings.docInsurancePath = targetFile.absolutePath
+                "puc" -> appSettings.docPucPath = targetFile.absolutePath
+            }
+
+            recordSyncTime()
+            updateDocumentsSummary()
+            provideHapticFeedback()
+            Toast.makeText(this, "Document uploaded successfully!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to upload document: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun viewDocument(path: String, title: String) {
+        val file = File(path)
+        if (!file.exists()) {
+            Toast.makeText(this, "Document file not found on device", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val fileUri: Uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.fileprovider",
+                file
+            )
+
+            val mimeType = if (file.name.endsWith(".pdf", ignoreCase = true)) {
+                "application/pdf"
+            } else {
+                "image/*"
+            }
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(fileUri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open document viewer: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showRsaDialog() {
@@ -640,24 +1517,6 @@ class MainActivity : AppCompatActivity() {
                 "⛓️ Drive Chain: 380 km until next 500 km lube cycle\n" +
                 "🛑 Braking System: Front & Rear Dual ABS Active\n" +
                 "📡 Digital Instrument Cluster: BLE GATT Bridge Ready"
-            )
-            .setPositiveButton("Close", null)
-            .show()
-    }
-
-    private fun showDocumentsDialog() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("📄 Digital Glovebox Documents")
-            .setMessage(
-                "🏍️ Registration Certificate (RC):\n" +
-                "• Number: MH02GC2593\n" +
-                "• Make/Model: Bajaj Pulsar NS200 BS6 DTS-i\n\n" +
-                "🛡️ Comprehensive Insurance:\n" +
-                "• Policy Status: Active\n" +
-                "• Expiry Date: 15 Nov 2027 (382 days left)\n\n" +
-                "💨 Pollution Under Control (PUC):\n" +
-                "• Certificate Status: Valid\n" +
-                "• Expiry Date: 18 Jan 2027 (81 days left)"
             )
             .setPositiveButton("Close", null)
             .show()
@@ -875,7 +1734,6 @@ class MainActivity : AppCompatActivity() {
             binding.cardAddFuel,
             binding.cardFuelBreakdown,
             binding.cardFuelLog,
-            binding.cardBookService,
             binding.cardServiceHistory,
             binding.cardServiceCenters,
             binding.cardChainLube,
@@ -937,7 +1795,6 @@ class MainActivity : AppCompatActivity() {
         // Primary Buttons (Open Google Maps & Scan)
         binding.btnOpenMaps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
         binding.btnOpenMaps.setTextColor(theme.onPrimaryColor)
-        binding.tvMapsModeBadge.setTextColor(theme.accentColor)
         binding.viewConnectionDivider.setBackgroundColor(theme.cardBorderColor)
 
         binding.btnFindPumps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
@@ -1041,7 +1898,7 @@ class MainActivity : AppCompatActivity() {
             updateFuelList(fuelLogManager.entries.value)
         } catch (_: Exception) {}
 
-        selectRidingMode(currentRidingMode)
+        updateHeroRangeDisplay()
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -1248,6 +2105,7 @@ class MainActivity : AppCompatActivity() {
                 val odo = input.text.toString().toDoubleOrNull()
                 if (odo != null && odo >= 0) {
                     maintenanceManager.setOdometer(odo)
+                    recordSyncTime()
                     Toast.makeText(this, "Odometer updated to %.1f km".format(odo), Toast.LENGTH_SHORT).show()
                 }
             }
@@ -1392,6 +2250,7 @@ class MainActivity : AppCompatActivity() {
                 if (odo != null && liters != null && cost != null && liters > 0) {
                     val entry = fuelLogManager.addFuelEntry(odo, liters, cost)
                     provideHapticFeedback()
+                    recordSyncTime()
                     val kmplMsg = if (entry.calculatedKmpl != null) {
                         " • Mileage: %.1f km/l!".format(entry.calculatedKmpl)
                     } else {
@@ -1507,6 +2366,7 @@ class MainActivity : AppCompatActivity() {
 
                         binding.tvParkedBanner.text = "Connected • Digital Cluster Synced • Ready to Ride!"
                         binding.viewParkedDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
+                        recordSyncTime()
                     }
                     is BleConnectionState.Error -> {
                         binding.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
@@ -1817,6 +2677,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (updated) {
                     provideHapticFeedback()
+                    recordSyncTime()
                     Toast.makeText(this, "Trip details updated successfully", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -1827,6 +2688,7 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("Delete") { _, _ ->
                         provideHapticFeedback()
                         rideTracker.deleteTrip(trip.id)
+                        recordSyncTime()
                         Toast.makeText(this, "Trip deleted", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Cancel", null)

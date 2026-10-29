@@ -123,20 +123,46 @@
                         android:orientation="vertical"
                         android:padding="18dp">
 
-                        <!-- Hero Range Display -->
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:letterSpacing="0.06"
-                            android:text="PROJECTED PETROL RANGE (DTE)"
-                            android:textColor="@color/text_tertiary"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
+                        <!-- Hero Range Display Header -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:letterSpacing="0.06"
+                                android:text="DISTANCE TO EMPTY (DTE)"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/btnQuickEditDte"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:paddingHorizontal="8dp"
+                                android:paddingVertical="4dp"
+                                android:text="✏️ Edit"
+                                android:textColor="@color/wine_red_light"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/layoutProjectedRange"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
                             android:gravity="bottom"
                             android:orientation="horizontal">
 
@@ -145,7 +171,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:letterSpacing="-0.04"
-                                android:text="385"
+                                android:text="340"
                                 android:textColor="@color/text_primary"
                                 android:textSize="44sp"
                                 android:textStyle="bold" />
@@ -168,58 +194,27 @@
                                 android:id="@+id/tvDteSubtext"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="~10.0L in tank"
+                                android:text="~10.2L in tank"
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
 
-                        <!-- Riding Profile Pill Selector (Eco / Street / Sport) -->
-                        <LinearLayout
+                        <!-- Recalibrate with Cluster Button -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRecalibrateCluster"
                             android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
+                            android:layout_height="50dp"
                             android:layout_marginTop="12dp"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:id="@+id/chipModeEco"
-                                android:layout_width="0dp"
-                                android:layout_height="38dp"
-                                android:layout_marginEnd="4dp"
-                                android:layout_weight="1"
-                                android:background="@drawable/pill_chip_inactive"
-                                android:gravity="center"
-                                android:text="🌿 Eco (38)"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="12sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/chipModeStreet"
-                                android:layout_width="0dp"
-                                android:layout_height="38dp"
-                                android:layout_marginHorizontal="2dp"
-                                android:layout_weight="1"
-                                android:background="@drawable/pill_chip_active"
-                                android:gravity="center"
-                                android:text="⚡ Street (35)"
-                                android:textColor="@color/text_primary"
-                                android:textSize="12sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/chipModeSport"
-                                android:layout_width="0dp"
-                                android:layout_height="38dp"
-                                android:layout_marginStart="4dp"
-                                android:layout_weight="1"
-                                android:background="@drawable/pill_chip_inactive"
-                                android:gravity="center"
-                                android:text="🔥 Sport (28)"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="12sp"
-                                android:textStyle="bold" />
-                        </LinearLayout>
+                            android:backgroundTint="@color/surface_elevated"
+                            android:letterSpacing="0.02"
+                            android:text="🔄  Recalibrate with Instrument Cluster"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            app:cornerRadius="12dp"
+                            app:strokeColor="@color/surface_border"
+                            app:strokeWidth="1dp" />
 
                         <View
                             android:layout_width="match_parent"
@@ -374,17 +369,6 @@
                             android:textSize="16sp"
                             android:textStyle="bold"
                             app:cornerRadius="14dp" />
-
-                        <TextView
-                            android:id="@+id/tvMapsModeBadge"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_horizontal"
-                            android:layout_marginTop="8dp"
-                            android:text="🛵 Two-Wheeler Routing (mode=l) • Cluster TBT Bridge"
-                            android:textColor="@color/wine_red_light"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1314,12 +1298,15 @@
                 android:paddingTop="12dp"
                 android:paddingBottom="24dp">
 
-                <!-- Vehicle Service Hero Card (Ather "Book your vehicle service") -->
+                <!-- Bajaj Authorized Service Centers Card -->
                 <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/cardBookService"
+                    android:id="@+id/cardServiceCenters"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="12dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
                     app:cardBackgroundColor="@color/surface_card"
                     app:cardCornerRadius="18dp"
                     app:cardElevation="0dp"
@@ -1332,29 +1319,29 @@
                         android:orientation="vertical"
                         android:padding="18dp">
 
-                        <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@drawable/ic_motorcycle"
-                            app:tint="@color/text_primary" />
-
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="📍"
+                                android:textSize="24sp" />
 
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
                                 android:layout_weight="1"
                                 android:orientation="vertical">
 
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Book your vehicle service"
+                                    android:text="Bajaj Authorized Service Centers"
                                     android:textColor="@color/text_primary"
                                     android:textSize="16sp"
                                     android:textStyle="bold" />
@@ -1363,113 +1350,90 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
-                                    android:text="Periodic checkup due at 22,000 km"
+                                    android:text="Locate nearby authorized workshops &amp; book service"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="12sp" />
                             </LinearLayout>
 
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnBookService"
+                            <TextView
                                 android:layout_width="wrap_content"
-                                android:layout_height="44dp"
-                                android:backgroundTint="@color/surface_elevated"
-                                android:paddingHorizontal="14dp"
-                                android:text="Book service →"
-                                android:textColor="@color/text_primary"
-                                android:textSize="12sp"
-                                android:textStyle="bold"
-                                app:cornerRadius="12dp" />
+                                android:layout_height="wrap_content"
+                                android:text="Maps →"
+                                android:textColor="@color/wine_red_light"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Split Cards: Service History & Service Centers -->
-                <LinearLayout
+                <!-- Service History & Maintenance Logs Card (Editable) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardServiceHistory"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="12dp"
-                    android:orientation="horizontal">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    app:cardBackgroundColor="@color/surface_card"
+                    app:cardCornerRadius="18dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/surface_border"
+                    app:strokeWidth="1.5dp">
 
-                    <!-- Service History -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/cardServiceHistory"
-                        android:layout_width="0dp"
-                        android:layout_height="72dp"
-                        android:layout_marginEnd="6dp"
-                        android:layout_weight="1"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:foreground="?attr/selectableItemBackground"
-                        app:cardBackgroundColor="@color/surface_card"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="0dp"
-                        app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="match_parent"
+                            android:layout_height="wrap_content"
                             android:gravity="center_vertical"
-                            android:orientation="horizontal"
-                            android:paddingHorizontal="14dp">
+                            android:orientation="horizontal">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="📄"
-                                android:textSize="20sp" />
+                                android:textSize="24sp" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Service History &amp; Records"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="16sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvServiceHistorySummary"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="View, edit &amp; log motorcycle maintenance"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="Service\nhistory"
-                                android:textColor="@color/text_primary"
+                                android:text="Edit →"
+                                android:textColor="@color/wine_red_light"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <!-- Service Centers -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/cardServiceCenters"
-                        android:layout_width="0dp"
-                        android:layout_height="72dp"
-                        android:layout_marginStart="6dp"
-                        android:layout_weight="1"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:foreground="?attr/selectableItemBackground"
-                        app:cardBackgroundColor="@color/surface_card"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="0dp"
-                        app:strokeColor="@color/surface_border"
-                        app:strokeWidth="1dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal"
-                            android:paddingHorizontal="14dp">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="📍"
-                                android:textSize="20sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:text="Service\ncenters"
-                                android:textColor="@color/text_primary"
-                                android:textSize="13sp"
-                                android:textStyle="bold" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
                 <!-- Chain Clean & Lube Card (NS200 Specific: 500 km) -->
                 <com.google.android.material.card.MaterialCardView
@@ -1873,6 +1837,7 @@
                             android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tvBikeName"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Nikhil's Pulsar NS200"
@@ -1891,14 +1856,15 @@
                         </LinearLayout>
 
                         <TextView
+                            android:id="@+id/btnEditBikeInfo"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:background="@drawable/pill_badge"
-                            android:paddingHorizontal="8dp"
-                            android:paddingVertical="3dp"
-                            android:text="Paired"
-                            android:textColor="@color/status_connected"
-                            android:textSize="10sp"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="5dp"
+                            android:text="✏️ Edit"
+                            android:textColor="@color/text_primary"
+                            android:textSize="11sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -2023,6 +1989,7 @@
                                     android:textStyle="bold" />
 
                                 <TextView
+                                    android:id="@+id/tvDocumentsSubtext"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text="RC, Insurance (Nov 2027), PUC (Jan 2027)"
@@ -2031,6 +1998,7 @@
                             </LinearLayout>
 
                             <TextView
+                                android:id="@+id/tvDocumentsBadge"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="3 Docs"

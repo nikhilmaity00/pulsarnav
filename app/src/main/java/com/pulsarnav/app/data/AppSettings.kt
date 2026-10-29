@@ -27,6 +27,26 @@ class AppSettings(context: Context) {
         const val KEY_PETROL_PRICE = "petrol_price_per_liter"
         const val KEY_LAST_BIKE_MAC = "last_connected_bike_mac"
 
+        const val KEY_BIKE_NAME = "bike_name"
+        const val KEY_BIKE_REG = "bike_reg_number"
+        const val KEY_BIKE_SPEC = "bike_model_spec"
+        const val KEY_RIDER_NAME = "rider_name"
+        const val KEY_RIDER_PHONE = "rider_phone"
+
+        const val KEY_PROJECTED_DTE = "projected_dte_km"
+        const val KEY_FUEL_PERCENT = "fuel_level_percent"
+        const val KEY_FUEL_LITERS = "fuel_level_liters"
+        const val KEY_LAST_SYNC_MS = "last_synced_timestamp_ms"
+
+        const val KEY_DOC_RC_NUMBER = "doc_rc_number"
+        const val KEY_DOC_RC_PATH = "doc_rc_path"
+        const val KEY_DOC_INSURANCE_POLICY = "doc_insurance_policy"
+        const val KEY_DOC_INSURANCE_EXPIRY = "doc_insurance_expiry"
+        const val KEY_DOC_INSURANCE_PATH = "doc_insurance_path"
+        const val KEY_DOC_PUC_CERT = "doc_puc_cert"
+        const val KEY_DOC_PUC_EXPIRY = "doc_puc_expiry"
+        const val KEY_DOC_PUC_PATH = "doc_puc_path"
+
         const val THEME_WINE_RED = "wine_red"
         const val THEME_AMOLED = "amoled"
         const val THEME_STEALTH = "stealth"
@@ -142,5 +162,107 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_LAST_BIKE_MAC, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_LAST_BIKE_MAC, value).apply()
+        }
+
+    var bikeName: String
+        get() = prefs.getString(KEY_BIKE_NAME, "Nikhil's Pulsar NS200") ?: "Nikhil's Pulsar NS200"
+        set(value) {
+            prefs.edit().putString(KEY_BIKE_NAME, value).apply()
+        }
+
+    var bikeRegNumber: String
+        get() = prefs.getString(KEY_BIKE_REG, "MH02GC2593") ?: "MH02GC2593"
+        set(value) {
+            prefs.edit().putString(KEY_BIKE_REG, value).apply()
+        }
+
+    var bikeModelSpec: String
+        get() = prefs.getString(KEY_BIKE_SPEC, "BS6 DTS-i 4V Liquid-Cooled") ?: "BS6 DTS-i 4V Liquid-Cooled"
+        set(value) {
+            prefs.edit().putString(KEY_BIKE_SPEC, value).apply()
+        }
+
+    var riderName: String
+        get() = prefs.getString(KEY_RIDER_NAME, "Nikhil Maity") ?: "Nikhil Maity"
+        set(value) {
+            prefs.edit().putString(KEY_RIDER_NAME, value).apply()
+        }
+
+    var riderPhone: String
+        get() = prefs.getString(KEY_RIDER_PHONE, "+91 98765 43210") ?: "+91 98765 43210"
+        set(value) {
+            prefs.edit().putString(KEY_RIDER_PHONE, value).apply()
+        }
+
+    var projectedDteKm: Int
+        get() = prefs.getInt(KEY_PROJECTED_DTE, 340)
+        set(value) {
+            prefs.edit().putInt(KEY_PROJECTED_DTE, value).apply()
+        }
+
+    var fuelLevelPercent: Int
+        get() = prefs.getInt(KEY_FUEL_PERCENT, 85)
+        set(value) {
+            prefs.edit().putInt(KEY_FUEL_PERCENT, value).apply()
+        }
+
+    var fuelLevelLiters: Float
+        get() = prefs.getFloat(KEY_FUEL_LITERS, 10.2f)
+        set(value) {
+            prefs.edit().putFloat(KEY_FUEL_LITERS, value).apply()
+        }
+
+    var lastSyncedTimestampMs: Long
+        get() = prefs.getLong(KEY_LAST_SYNC_MS, System.currentTimeMillis())
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_SYNC_MS, value).apply()
+        }
+
+    var docRcNumber: String
+        get() = prefs.getString(KEY_DOC_RC_NUMBER, "MH02GC2593") ?: "MH02GC2593"
+        set(value) {
+            prefs.edit().putString(KEY_DOC_RC_NUMBER, value).apply()
+        }
+
+    var docRcPath: String
+        get() = prefs.getString(KEY_DOC_RC_PATH, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_DOC_RC_PATH, value).apply()
+        }
+
+    var docInsurancePolicy: String
+        get() = prefs.getString(KEY_DOC_INSURANCE_POLICY, "Bajaj Allianz Drive Assure") ?: "Bajaj Allianz Drive Assure"
+        set(value) {
+            prefs.edit().putString(KEY_DOC_INSURANCE_POLICY, value).apply()
+        }
+
+    var docInsuranceExpiry: String
+        get() = prefs.getString(KEY_DOC_INSURANCE_EXPIRY, "15 Nov 2027") ?: "15 Nov 2027"
+        set(value) {
+            prefs.edit().putString(KEY_DOC_INSURANCE_EXPIRY, value).apply()
+        }
+
+    var docInsurancePath: String
+        get() = prefs.getString(KEY_DOC_INSURANCE_PATH, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_DOC_INSURANCE_PATH, value).apply()
+        }
+
+    var docPucCert: String
+        get() = prefs.getString(KEY_DOC_PUC_CERT, "MH02-PUC-9482") ?: "MH02-PUC-9482"
+        set(value) {
+            prefs.edit().putString(KEY_DOC_PUC_CERT, value).apply()
+        }
+
+    var docPucExpiry: String
+        get() = prefs.getString(KEY_DOC_PUC_EXPIRY, "18 Jan 2027") ?: "18 Jan 2027"
+        set(value) {
+            prefs.edit().putString(KEY_DOC_PUC_EXPIRY, value).apply()
+        }
+
+    var docPucPath: String
+        get() = prefs.getString(KEY_DOC_PUC_PATH, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_DOC_PUC_PATH, value).apply()
         }
 }
