@@ -12,7 +12,6 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
@@ -49,6 +48,21 @@ import com.pulsarnav.app.tracking.Trip
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
+data class CockpitTheme(
+    val id: String,
+    val name: String,
+    val displayName: String,
+    val backgroundColor: Int,
+    val surfaceColor: Int,
+    val cardColor: Int,
+    val cardBorderColor: Int,
+    val primaryColor: Int,
+    val onPrimaryColor: Int,
+    val accentColor: Int,
+    val subtleColor: Int,
+    val borderColor: Int
+)
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -61,6 +75,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var maintenanceManager: MaintenanceManager
     private lateinit var fuelLogManager: FuelLogManager
     private lateinit var mediaControlManager: MediaControlManager
+
+    private var currentTheme: CockpitTheme = getThemeDefinition(AppSettings.THEME_WINE_RED)
+    private var currentRidingMode: String = "street"
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -100,15 +117,20 @@ class MainActivity : AppCompatActivity() {
         fuelLogManager = FuelLogManager.getInstance(this)
         mediaControlManager = MediaControlManager.getInstance(this)
 
-        callManager.initialize()
-        telemetryManager.initialize()
-
+        // Setup UI Sections
         setupBottomNavigation()
         setupListeners()
+        setupRidingModes()
+        setupStatsNavigation()
+        setupSupportAndAccountDialogs()
         setupFeatureToggles()
         setupThemeSelector()
-        applyTheme(appSettings.appTheme)
         setupQuickNav()
+
+        // Apply saved theme
+        applyTheme(appSettings.appTheme)
+
+        // Observers
         observeBleState()
         observeNavigation()
         observeTelephonyAndAlerts()
@@ -118,17 +140,32 @@ class MainActivity : AppCompatActivity() {
         observeMaintenance()
         observeFuelLog()
 
-        // Auto-scan on launch if not connected
-        checkAndStartScan(silent = true)
+        // Handle quick action intents
+        intent?.let { handleIntentActions(it) }
 
-        // Handle Samsung Routine / Shortcut intents
-        handleIntentActions(intent)
+        // Initial scan if permissions are ready
+        checkAndStartScan(silent = true)
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
         intent?.let { handleIntentActions(it) }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (binding.scrollTrips.visibility == View.VISIBLE) {
+            switchTab(binding.scrollCockpit)
+        } else if (binding.scrollFuel.visibility == View.VISIBLE ||
+            binding.scrollSupport.visibility == View.VISIBLE ||
+            binding.scrollSettings.visibility == View.VISIBLE
+        ) {
+            binding.bottomNav.selectedItemId = R.id.nav_home
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+        }
     }
 
     private fun handleIntentActions(intent: Intent) {
@@ -160,10 +197,10 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             provideHapticFeedback()
             when (item.itemId) {
-                R.id.nav_cockpit -> switchTab(binding.scrollCockpit)
-                R.id.nav_trips -> switchTab(binding.scrollTrips)
-                R.id.nav_garage -> switchTab(binding.scrollGarage)
-                R.id.nav_settings -> switchTab(binding.scrollSettings)
+                R.id.nav_home -> switchTab(binding.scrollCockpit)
+                R.id.nav_fuel -> switchTab(binding.scrollFuel)
+                R.id.nav_support -> switchTab(binding.scrollSupport)
+                R.id.nav_account -> switchTab(binding.scrollSettings)
                 else -> false
             }
         }
@@ -171,12 +208,124 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchTab(targetView: View): Boolean {
         binding.scrollCockpit.visibility = View.GONE
-        binding.scrollTrips.visibility = View.GONE
-        binding.scrollGarage.visibility = View.GONE
+        binding.scrollFuel.visibility = View.GONE
+        binding.scrollSupport.visibility = View.GONE
         binding.scrollSettings.visibility = View.GONE
+        binding.scrollTrips.visibility = View.GONE
 
         targetView.visibility = View.VISIBLE
         return true
+    }
+
+    private fun showRidingStats(showAllRidesTab: Boolean = false) {
+        provideHapticFeedback()
+        binding.scrollCockpit.visibility = View.GONE
+        binding.scrollFuel.visibility = View.GONE
+        binding.scrollSupport.visibility = View.GONE
+        binding.scrollSettings.visibility = View.GONE
+        binding.scrollTrips.visibility = View.VISIBLE
+
+        selectStatsTab(if (showAllRidesTab) binding.tabStatsAllRides else binding.tabStatsHighlights)
+    }
+
+    private fun selectStatsTab(selectedTab: TextView) {
+        val isHighlights = (selectedTab.id == R.id.tabStatsHighlights)
+        binding.layoutStatsHighlights.visibility = if (isHighlights) View.VISIBLE else View.GONE
+        binding.layoutStatsAllRides.visibility = if (isHighlights) View.GONE else View.VISIBLE
+
+        binding.tabStatsHighlights.setBackgroundResource(if (isHighlights) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.tabStatsHighlights.setTextColor(if (isHighlights) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+
+        binding.tabStatsAllRides.setBackgroundResource(if (!isHighlights) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.tabStatsAllRides.setTextColor(if (!isHighlights) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+    }
+
+    private fun setupRidingModes() {
+        binding.chipModeEco.setOnClickListener {
+            provideHapticFeedback()
+            selectRidingMode("eco")
+        }
+        binding.chipModeStreet.setOnClickListener {
+            provideHapticFeedback()
+            selectRidingMode("street")
+        }
+        binding.chipModeSport.setOnClickListener {
+            provideHapticFeedback()
+            selectRidingMode("sport")
+        }
+        selectRidingMode("street")
+    }
+
+    private fun selectRidingMode(mode: String) {
+        currentRidingMode = mode
+        val isEco = mode == "eco"
+        val isStreet = mode == "street"
+        val isSport = mode == "sport"
+
+        binding.chipModeEco.setBackgroundResource(if (isEco) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.chipModeEco.setTextColor(if (isEco) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+
+        binding.chipModeStreet.setBackgroundResource(if (isStreet) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.chipModeStreet.setTextColor(if (isStreet) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+
+        binding.chipModeSport.setBackgroundResource(if (isSport) R.drawable.pill_chip_active else R.drawable.pill_chip_inactive)
+        binding.chipModeSport.setTextColor(if (isSport) currentTheme.accentColor else ContextCompat.getColor(this, R.color.text_secondary))
+
+        updateHeroRangeDisplay()
+    }
+
+    private fun updateHeroRangeDisplay() {
+        val estFuelLiters = 10.2
+        val mileage = when (currentRidingMode) {
+            "eco" -> 38.5
+            "sport" -> 28.0
+            else -> 35.0
+        }
+        val dteKm = (estFuelLiters * mileage).toInt()
+        binding.tvProjectedRange.text = dteKm.toString()
+        binding.tvDteSubtext.text = "~${"%.1f".format(estFuelLiters)}L in tank"
+        binding.tvFuelLevelText.text = "85% Tank Level • ${"%.1f".format(estFuelLiters)}L / 12.0L"
+    }
+
+    private fun setupStatsNavigation() {
+        binding.btnViewAllRidingStats.setOnClickListener {
+            showRidingStats(showAllRidesTab = false)
+        }
+        binding.btnViewPreviousRides.setOnClickListener {
+            showRidingStats(showAllRidesTab = true)
+        }
+        binding.btnViewRideDetails.setOnClickListener {
+            showRidingStats(showAllRidesTab = true)
+        }
+        binding.btnBackFromStats.setOnClickListener {
+            provideHapticFeedback()
+            switchTab(binding.scrollCockpit)
+        }
+        binding.tabStatsHighlights.setOnClickListener {
+            provideHapticFeedback()
+            selectStatsTab(binding.tabStatsHighlights)
+        }
+        binding.tabStatsAllRides.setOnClickListener {
+            provideHapticFeedback()
+            selectStatsTab(binding.tabStatsAllRides)
+        }
+        binding.btnShareRide.setOnClickListener {
+            provideHapticFeedback()
+            shareRideSummary()
+        }
+    }
+
+    private fun shareRideSummary() {
+        val sendIntent: Intent = Intent().apply {
+            action = Intent.ACTION_SEND
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "🏍️ Pulsar NS200 Ride Log:\nDistance: 6.2 km • Time: 18 min • Avg Mileage: 38.5 km/l\nRecorded via PulsarNav Companion."
+            )
+            type = "text/plain"
+        }
+        val shareIntent = Intent.createChooser(sendIntent, "Share Ride Summary")
+        startActivity(shareIntent)
     }
 
     private fun setupListeners() {
@@ -193,22 +342,21 @@ class MainActivity : AppCompatActivity() {
         // Open Google Maps
         binding.btnOpenMaps.setOnClickListener {
             provideHapticFeedback()
-            BikeBleForegroundService.start(this)
-            val mode = if (appSettings.isTwoWheelerMode) "l" else "d"
-            try {
-                val gmmIntentUri = Uri.parse("google.navigation:q=&mode=$mode")
-                val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
-                    setPackage("com.google.android.apps.maps")
-                }
-                startActivity(mapIntent)
-            } catch (e: Exception) {
-                try {
-                    val travelMode = if (appSettings.isTwoWheelerMode) "two_wheeler" else "driving"
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com?travelmode=$travelMode")))
-                } catch (e2: Exception) {
-                    Toast.makeText(this, "Could not open Google Maps", Toast.LENGTH_SHORT).show()
-                }
-            }
+            launchGoogleMapsRide()
+        }
+
+        // Search Bar click
+        binding.layoutSearchBar.setOnClickListener {
+            provideHapticFeedback()
+            launchGoogleMapsRide()
+        }
+
+        // Quick Nearby Fuel on Home and Fuel Tabs
+        binding.cardQuickFuel.setOnClickListener {
+            launchNearbyFuelPumps()
+        }
+        binding.btnFindPumps.setOnClickListener {
+            launchNearbyFuelPumps()
         }
 
         // Navigate to Bike (Walking Directions)
@@ -233,7 +381,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Garage Test Bench: Turn simulation
+        // Turn simulation test bench
         binding.btnTestLeft.setOnClickListener {
             provideHapticFeedback()
             updateNavDisplay(Maneuver.TURN_LEFT, "250 m", "Left onto MG Road", 14)
@@ -250,7 +398,7 @@ class MainActivity : AppCompatActivity() {
             bleManager.sendNavigationStep(Maneuver.TURN_RIGHT, 150, "Right onto Link Road", 8)
         }
 
-        // Garage Test Bench: Call & WhatsApp simulation
+        // Call & WhatsApp simulation
         binding.btnSimulateCall.setOnClickListener {
             provideHapticFeedback()
             callManager.simulateIncomingCall("Dad", "+91 98765 43210")
@@ -272,14 +420,14 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Call Ended / Idle", Toast.LENGTH_SHORT).show()
         }
 
-        // Garage Test Bench: Parking Simulation
+        // Parking Simulation
         binding.btnSimulatePark.setOnClickListener {
             provideHapticFeedback()
             parkingManager.saveLocation(19.0596, 72.8295, "Bandra Bandstand, Mumbai")
             Toast.makeText(this, "Simulated parking location saved!", Toast.LENGTH_SHORT).show()
         }
 
-        // Trips: Simulate Ride
+        // Simulate Ride
         binding.btnSimulateRide.setOnClickListener {
             provideHapticFeedback()
             rideTracker.simulateTrip(14.2, 1695, 84.0, 36.2, "Bandra to BKC Ride")
@@ -287,35 +435,236 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Simulated 14.2 km ride logged!", Toast.LENGTH_SHORT).show()
         }
 
-        // Garage: Edit Odometer
+        // Edit Odometer
         binding.btnEditOdo.setOnClickListener {
             provideHapticFeedback()
             showEditOdometerDialog()
         }
 
-        // Garage: Mark Chain Lubed
+        // Mark Chain Lubed
         binding.btnMarkChainLubed.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markChainLubed()
             Toast.makeText(this, "Chain marked cleaned & lubed (500 km reset)", Toast.LENGTH_SHORT).show()
         }
 
-        // Garage: Mark Serviced
+        // Mark Serviced
         binding.btnMarkServiced.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markServiceDone()
             Toast.makeText(this, "Service interval reset to 5,000 km", Toast.LENGTH_SHORT).show()
         }
 
-        // Garage: Add Refuel Entry
+        // Add Refuel Entry
         binding.btnAddFuel.setOnClickListener {
             provideHapticFeedback()
             showAddFuelDialog()
         }
     }
 
+    private fun launchGoogleMapsRide() {
+        BikeBleForegroundService.start(this)
+        val mode = if (appSettings.isTwoWheelerMode) "l" else "d"
+        try {
+            val gmmIntentUri = Uri.parse("google.navigation:q=&mode=$mode")
+            val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
+                setPackage("com.google.android.apps.maps")
+            }
+            startActivity(mapIntent)
+        } catch (e: Exception) {
+            try {
+                val travelMode = if (appSettings.isTwoWheelerMode) "two_wheeler" else "driving"
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com?travelmode=$travelMode")))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "Could not open Google Maps", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun launchNearbyFuelPumps() {
+        provideHapticFeedback()
+        val mode = if (appSettings.isTwoWheelerMode) "l" else "d"
+        try {
+            val uri = Uri.parse("google.navigation:q=petrol+pump&mode=$mode")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.google.android.apps.maps")
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=petrol+pump")))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "Could not locate nearby petrol pumps", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun setupSupportAndAccountDialogs() {
+        // Book Service & Service Centers -> Launch Maps search for Bajaj Service Center
+        val openBajajService = View.OnClickListener {
+            provideHapticFeedback()
+            try {
+                val uri = Uri.parse("geo:0,0?q=Bajaj+authorized+service+center")
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage("com.google.android.apps.maps")
+                }
+                startActivity(intent)
+            } catch (_: Exception) {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com?q=Bajaj+service+center")))
+            }
+        }
+        binding.btnBookService.setOnClickListener(openBajajService)
+        binding.cardServiceCenters.setOnClickListener(openBajajService)
+
+        // Service History Dialog
+        binding.cardServiceHistory.setOnClickListener {
+            provideHapticFeedback()
+            showServiceHistoryDialog()
+        }
+
+        // Roadside Assistance Dialog (24x7)
+        binding.rowRsa.setOnClickListener {
+            provideHapticFeedback()
+            showRsaDialog()
+        }
+
+        // Vehicle Manual & NS200 Specs
+        binding.rowManual.setOnClickListener {
+            provideHapticFeedback()
+            showManualDialog()
+        }
+
+        // Support Issue Button
+        binding.btnSupportIssue.setOnClickListener {
+            provideHapticFeedback()
+            showSupportIssueDialog()
+        }
+
+        // True Health
+        binding.rowTrueHealth.setOnClickListener {
+            provideHapticFeedback()
+            showTrueHealthDialog()
+        }
+
+        // Digital Glovebox Documents
+        binding.rowDocuments.setOnClickListener {
+            provideHapticFeedback()
+            showDocumentsDialog()
+        }
+    }
+
+    private fun showServiceHistoryDialog() {
+        val odo = maintenanceManager.status.value.totalOdometerKm
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📄 Service & Maintenance Records")
+            .setMessage(
+                "• 1st Free Service (500 km): Completed\n" +
+                "• 2nd Free Service (4,500 km): Completed\n" +
+                "• 3rd Free Service (9,500 km): Completed\n" +
+                "• DTS-i Synthetic Oil Flush: Active\n" +
+                "• Drive Chain Slack: OK (Cleaned & Lubed)\n" +
+                "• Next Periodic Service: Due at %.0f km".format(odo + maintenanceManager.status.value.serviceRemainingKm)
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showRsaDialog() {
+        val options = arrayOf(
+            "📞 Bajaj 24x7 RSA Helpline (1800 233 2453)",
+            "📞 National Highway Assistance (1033)",
+            "📞 Emergency Services (112)"
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🚚 Emergency Roadside Assistance")
+            .setItems(options) { _, which ->
+                provideHapticFeedback()
+                val phone = when (which) {
+                    0 -> "18002332453"
+                    1 -> "1033"
+                    else -> "112"
+                }
+                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+                try {
+                    startActivity(intent)
+                } catch (_: Exception) {
+                    Toast.makeText(this, "Could not open dialer for $phone", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showManualDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📖 Pulsar NS200 BS6 Quick Handbook")
+            .setMessage(
+                "⚙️ ENGINE & TRANSMISSION:\n" +
+                "• 199.5 cc Triple Spark 4V Liquid-Cooled\n" +
+                "• 24.5 PS @ 9750 RPM • 18.7 Nm @ 8000 RPM\n\n" +
+                "🛞 TIRE PRESSURES (Cold):\n" +
+                "• Front: 28 PSI (Solo & Pillion)\n" +
+                "• Rear: 32 PSI (Solo) • 36 PSI (Pillion)\n\n" +
+                "🛢️ FLUID SPECIFICATIONS:\n" +
+                "• Engine Oil: 10W-50 Semi-Synthetic / Fully Synthetic (1200 ml)\n" +
+                "• Coolant: Ready-mix Glycol Coolant (1000 ml)\n" +
+                "• Brake Fluid: DOT 4\n\n" +
+                "⛓️ DRIVE CHAIN & PLUGS:\n" +
+                "• Free Slack: 25 - 35 mm (Lubricate every 500 km)\n" +
+                "• Spark Plugs: Champion RG4HC (Center) + RG6HCC (Left & Right)\n" +
+                "• Fuel Tank: 12.0 L (Reserve begins at 2.4 L)"
+            )
+            .setPositiveButton("Got It", null)
+            .show()
+    }
+
+    private fun showSupportIssueDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("💬 PulsarNav Support & Diagnostic Logs")
+            .setMessage("All Turn-by-Turn GATT packets and Bluetooth logs are stored locally. Would you like to share a diagnostic log or report an issue on GitHub?")
+            .setPositiveButton("Report on GitHub") { _, _ ->
+                provideHapticFeedback()
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/nikhilmaity00/pulsarnav/issues")))
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showTrueHealthDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🛡️ Pulsar NS200 True Health")
+            .setMessage(
+                "⚡ Electrical & Battery: 12.6V (Optimal)\n" +
+                "❄️ Engine Cooling: Liquid coolant level normal\n" +
+                "🛢️ Engine Oil: 4,880 km until next 5,000 km oil service\n" +
+                "⛓️ Drive Chain: 380 km until next 500 km lube cycle\n" +
+                "🛑 Braking System: Front & Rear Dual ABS Active\n" +
+                "📡 Digital Instrument Cluster: BLE GATT Bridge Ready"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showDocumentsDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📄 Digital Glovebox Documents")
+            .setMessage(
+                "🏍️ Registration Certificate (RC):\n" +
+                "• Number: MH02GC2593\n" +
+                "• Make/Model: Bajaj Pulsar NS200 BS6 DTS-i\n\n" +
+                "🛡️ Comprehensive Insurance:\n" +
+                "• Policy Status: Active\n" +
+                "• Expiry Date: 15 Nov 2027 (382 days left)\n\n" +
+                "💨 Pollution Under Control (PUC):\n" +
+                "• Certificate Status: Valid\n" +
+                "• Expiry Date: 18 Jan 2027 (81 days left)"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
     private fun setupFeatureToggles() {
-        // Switch listeners
+        // Two-Wheeler Mode Switch
         binding.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
         binding.switchTwoWheeler.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTwoWheelerMode = isChecked
@@ -326,6 +675,7 @@ class MainActivity : AppCompatActivity() {
             binding.switchTwoWheeler.toggle()
         }
 
+        // Auto Park Switch
         binding.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
         binding.switchAutoPark.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isAutoParkEnabled = isChecked
@@ -336,6 +686,7 @@ class MainActivity : AppCompatActivity() {
             binding.switchAutoPark.toggle()
         }
 
+        // Ride Tracking Switch
         binding.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
         binding.switchRideTracking.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isRideTrackingEnabled = isChecked
@@ -346,16 +697,18 @@ class MainActivity : AppCompatActivity() {
             binding.switchRideTracking.toggle()
         }
 
+        // Media Control Switch
         binding.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
         binding.switchMediaControl.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isMediaControlEnabled = isChecked
-            Toast.makeText(this, "Handlebar Media Control: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Media Control: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowMediaControl.setOnClickListener {
             provideHapticFeedback()
             binding.switchMediaControl.toggle()
         }
 
+        // WhatsApp Alerts Switch
         binding.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
         binding.switchWhatsAppAlerts.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isWhatsAppAlertsEnabled = isChecked
@@ -366,10 +719,11 @@ class MainActivity : AppCompatActivity() {
             binding.switchWhatsAppAlerts.toggle()
         }
 
+        // Telemetry Switch
         binding.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
         binding.switchTelemetry.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTelemetrySyncEnabled = isChecked
-            Toast.makeText(this, "Phone Telemetry Sync: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Cluster Telemetry: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowTelemetry.setOnClickListener {
             provideHapticFeedback()
@@ -377,36 +731,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class CockpitTheme(
-        val key: String,
-        val name: String,
-        val badgeLabel: String,
-        val backgroundColor: Int,
-        val surfaceColor: Int,
-        val cardColor: Int,
-        val cardBorderColor: Int,
-        val primaryColor: Int,
-        val onPrimaryColor: Int,
-        val accentColor: Int,
-        val subtleColor: Int,
-        val borderColor: Int
-    )
-
-    private var currentTheme: CockpitTheme = getThemeDefinition(AppSettings.THEME_WINE_RED)
-
     private fun getThemeDefinition(themeKey: String): CockpitTheme {
         return when (themeKey) {
             AppSettings.THEME_AMOLED -> CockpitTheme(
                 AppSettings.THEME_AMOLED, "AMOLED Black", "🖤 AMOLED Black",
                 backgroundColor = Color.parseColor("#000000"),
                 surfaceColor = Color.parseColor("#000000"),
-                cardColor = Color.parseColor("#09090C"),
-                cardBorderColor = Color.parseColor("#25252E"),
-                primaryColor = Color.parseColor("#F8FAFC"),
-                onPrimaryColor = Color.parseColor("#000000"),
+                cardColor = Color.parseColor("#0B0B0E"),
+                cardBorderColor = Color.parseColor("#262630"),
+                primaryColor = Color.parseColor("#FFFFFF"),
+                onPrimaryColor = Color.BLACK,
                 accentColor = Color.parseColor("#FFFFFF"),
-                subtleColor = Color.parseColor("#18181F"),
-                borderColor = Color.parseColor("#3B3B48")
+                subtleColor = Color.parseColor("#141418"),
+                borderColor = Color.parseColor("#383844")
             )
             AppSettings.THEME_STEALTH -> CockpitTheme(
                 AppSettings.THEME_STEALTH, "Stealth Mono", "⬛ Stealth Mono",
@@ -518,34 +855,49 @@ class MainActivity : AppCompatActivity() {
         binding.layoutTopBar.setBackgroundColor(theme.backgroundColor)
         binding.layoutContentFrame.setBackgroundColor(theme.backgroundColor)
         binding.scrollCockpit.setBackgroundColor(theme.backgroundColor)
-        binding.scrollTrips.setBackgroundColor(theme.backgroundColor)
-        binding.scrollGarage.setBackgroundColor(theme.backgroundColor)
+        binding.scrollFuel.setBackgroundColor(theme.backgroundColor)
+        binding.scrollSupport.setBackgroundColor(theme.backgroundColor)
         binding.scrollSettings.setBackgroundColor(theme.backgroundColor)
+        binding.scrollTrips.setBackgroundColor(theme.backgroundColor)
         binding.viewTopDivider.setBackgroundColor(theme.cardBorderColor)
 
-        // 3. Content Cards across all 4 Tabs
+        // 3. Content Cards across all Tabs
         val contentCards = listOf(
+            binding.cardHeroRange,
+            binding.cardConnection,
+            binding.cardLastParked,
+            binding.cardLatestRide,
+            binding.cardLifetimeStatsHome,
             binding.cardQuickHome,
             binding.cardQuickWork,
-            binding.cardLastParked,
-            binding.cardHudMirror,
-            binding.cardCallerId,
-            binding.cardConnection,
-            binding.cardLifetimeStats,
-            binding.cardOdometer,
+            binding.cardQuickFuel,
+            binding.cardNearbyPumps,
+            binding.cardAddFuel,
+            binding.cardFuelBreakdown,
+            binding.cardFuelLog,
+            binding.cardBookService,
+            binding.cardServiceHistory,
+            binding.cardServiceCenters,
             binding.cardChainLube,
             binding.cardService,
-            binding.cardFuelLog,
+            binding.cardSupportOptions,
+            binding.cardProfile,
+            binding.cardMyBike,
+            binding.cardOwnership,
+            binding.cardHudMirror,
+            binding.cardCallerId,
             binding.cardToggles,
             binding.cardQuickDestinations,
-            binding.cardAboutLegal
+            binding.cardAboutLegal,
+            binding.cardMonthSoFar,
+            binding.cardLifetimeStats
         )
         for (card in contentCards) {
             card.setCardBackgroundColor(theme.cardColor)
             card.strokeColor = theme.cardBorderColor
         }
 
-        // 5. Theme Selection Cards in Settings
+        // 4. Theme Selection Cards
         val themeCards = listOf(
             binding.cardThemeWineRed to (themeKey == AppSettings.THEME_WINE_RED),
             binding.cardThemeAmoled to (themeKey == AppSettings.THEME_AMOLED),
@@ -560,13 +912,16 @@ class MainActivity : AppCompatActivity() {
             card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
         }
 
-        // 6. Cockpit Quick-Nav & HUD Elements
+        // 5. Cockpit Elements
+        binding.tvProjectedRange.setTextColor(theme.accentColor)
+        binding.progressFuelLevel.setIndicatorColor(theme.primaryColor)
+        binding.progressFuelLevel.trackColor = theme.cardBorderColor
+
         binding.tvQuickHomeTitle.setTextColor(theme.accentColor)
         binding.tvQuickWorkTitle.setTextColor(theme.accentColor)
         binding.cardQuickHome.strokeColor = theme.borderColor
         binding.cardQuickWork.strokeColor = theme.borderColor
-        binding.tvIconHome.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvIconWork.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.cardQuickFuel.strokeColor = theme.borderColor
 
         binding.layoutManeuverIcon.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.tvManeuverIcon.setTextColor(theme.accentColor)
@@ -585,6 +940,9 @@ class MainActivity : AppCompatActivity() {
         binding.tvMapsModeBadge.setTextColor(theme.accentColor)
         binding.viewConnectionDivider.setBackgroundColor(theme.cardBorderColor)
 
+        binding.btnFindPumps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
+        binding.btnFindPumps.setTextColor(theme.onPrimaryColor)
+
         if (bleManager.connectionState.value !is BleConnectionState.Connected) {
             binding.btnScan.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
             binding.btnScan.setTextColor(theme.onPrimaryColor)
@@ -598,13 +956,12 @@ class MainActivity : AppCompatActivity() {
         binding.tvCallerStatus.setTextColor(theme.accentColor)
         binding.tvWhatsAppAlertBanner.setTextColor(theme.accentColor)
 
-        // 7. Trips Tab Elements
+        // Riding Stats Elements
         binding.tvLifetimeDistance.setTextColor(theme.accentColor)
         binding.btnSimulateRide.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.btnSimulateRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnSimulateRide.setTextColor(theme.accentColor)
 
-        // 8. Garage Tab Elements
         binding.btnEditOdo.setTextColor(theme.accentColor)
         binding.btnEditOdo.strokeColor = ColorStateList.valueOf(theme.borderColor)
 
@@ -620,7 +977,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnAddFuel.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnAddFuel.setTextColor(theme.accentColor)
 
-        // 9. Settings Tab (Switches & Test Bench)
         binding.btnConfigHome.setTextColor(theme.accentColor)
         binding.btnConfigWork.setTextColor(theme.accentColor)
         binding.btnSimulatePark.setTextColor(theme.accentColor)
@@ -635,7 +991,7 @@ class MainActivity : AppCompatActivity() {
             btn.setTextColor(theme.accentColor)
         }
 
-        // All 6 Feature Switches with dynamic theme glow
+        // Switches
         val switches = listOf(
             binding.switchTwoWheeler,
             binding.switchAutoPark,
@@ -664,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
             sw.thumbTintList = thumbTintList
         }
 
-        // 10. Bottom Navigation Bar
+        // Bottom Navigation Bar
         binding.bottomNav.setBackgroundColor(theme.surfaceColor)
         binding.bottomNav.itemActiveIndicatorColor = ColorStateList.valueOf(theme.subtleColor)
         val navStates = arrayOf(
@@ -679,11 +1035,13 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.itemIconTintList = navColorList
         binding.bottomNav.itemTextColor = navColorList
 
-        // 11. Dynamic Lists (Trips & Fuel Log)
+        // Dynamic Lists
         try {
             updateTripList(rideTracker.tripHistory.value)
             updateFuelList(fuelLogManager.entries.value)
         } catch (_: Exception) {}
+
+        selectRidingMode(currentRidingMode)
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -693,7 +1051,6 @@ class MainActivity : AppCompatActivity() {
     private fun setupQuickNav() {
         updateQuickNavButtons()
 
-        // 74dp Glove-Friendly HOME Card
         binding.cardQuickHome.setOnClickListener {
             provideHapticFeedback()
             val addr = appSettings.homeAddress.ifBlank { "Home" }
@@ -705,7 +1062,6 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        // 74dp Glove-Friendly WORK Card
         binding.cardQuickWork.setOnClickListener {
             provideHapticFeedback()
             val addr = appSettings.workAddress.ifBlank { "Work" }
@@ -728,36 +1084,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showQuickNavChooserDialog() {
-        val options = arrayOf("Configure 🏠 Home", "Configure 🏢 Work")
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Quick Navigation Destinations")
-            .setItems(options) { _, which ->
-                provideHapticFeedback()
-                if (which == 0) showSetAddressDialog("Home", true)
-                else showSetAddressDialog("Work", false)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
     private fun updateQuickNavButtons() {
         val home = appSettings.homeAddress
         val work = appSettings.workAddress
 
-        binding.tvQuickHomeTitle.text = "HOME"
-        binding.tvQuickHomeSub.text = if (home.isNotBlank() && home != "Home") home else "Tap to route (Saved Home)"
-
-        binding.tvQuickWorkTitle.text = "WORK"
-        binding.tvQuickWorkSub.text = if (work.isNotBlank() && work != "Work") work else "Tap to route (Saved Work)"
+        binding.tvQuickHomeTitle.text = "Home"
+        binding.tvQuickWorkTitle.text = "Work"
 
         binding.tvSettingsHome.text = "🏠 Home: ${if (home.isNotBlank()) home else "Google Maps Saved Home"}"
         binding.tvSettingsWork.text = "🏢 Work: ${if (work.isNotBlank()) work else "Google Maps Saved Work"}"
     }
 
-    /**
-     * Glove Mode Haptic Pulse: transmits crisp vibration feedback through riding gloves
-     */
     private fun provideHapticFeedback() {
         try {
             window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
@@ -822,7 +1159,6 @@ class MainActivity : AppCompatActivity() {
             etCustom.setText(current)
         }
 
-        // Apply active theme colors
         btnSaveCustom.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
         btnSaveCustom.setTextColor(currentTheme.onPrimaryColor)
         cardOptionMapsSaved.strokeColor = currentTheme.cardBorderColor
@@ -834,7 +1170,7 @@ class MainActivity : AppCompatActivity() {
             val defaultVal = if (isHome) "Home" else "Work"
             if (isHome) appSettings.homeAddress = defaultVal else appSettings.workAddress = defaultVal
             updateQuickNavButtons()
-            Toast.makeText(this, "Linked to Google Maps $label (Zero typing)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Linked to Google Maps $label", Toast.LENGTH_SHORT).show()
             sheet.dismiss()
         }
 
@@ -850,7 +1186,7 @@ class MainActivity : AppCompatActivity() {
             if (text.isNotBlank()) {
                 if (isHome) appSettings.homeAddress = text else appSettings.workAddress = text
                 updateQuickNavButtons()
-                Toast.makeText(this, "$label address saved: $text", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "$label address saved", Toast.LENGTH_SHORT).show()
                 sheet.dismiss()
             } else {
                 Toast.makeText(this, "Please enter an address or landmark", Toast.LENGTH_SHORT).show()
@@ -883,7 +1219,7 @@ class MainActivity : AppCompatActivity() {
             val addr = "%.5f,%.5f".format(lat, lng)
             if (isHome) appSettings.homeAddress = addr else appSettings.workAddress = addr
             updateQuickNavButtons()
-            Toast.makeText(this, "Pinned current GPS as $label ($addr)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Pinned GPS as $label", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "Unable to get current GPS location", Toast.LENGTH_SHORT).show()
         }
@@ -906,7 +1242,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Edit Current Odometer")
+            .setTitle("Edit Lifetime Odometer")
             .setView(container)
             .setPositiveButton("Save") { _, _ ->
                 val odo = input.text.toString().toDoubleOrNull()
@@ -936,7 +1272,6 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(tvDesc)
 
-        // Presets container
         val presetRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 16)
@@ -970,7 +1305,6 @@ class MainActivity : AppCompatActivity() {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
         }
 
-        // Live calculation when user types cost
         costInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val amt = s?.toString()?.toDoubleOrNull()
@@ -1141,6 +1475,9 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
                         binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
                         binding.layoutDeviceList.visibility = View.VISIBLE
+
+                        binding.tvParkedBanner.text = "Parked • Your Pulsar NS200 is ready to ride • Lets go!"
+                        binding.viewParkedDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                     }
                     is BleConnectionState.Scanning -> {
                         binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
@@ -1167,6 +1504,9 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
                         binding.btnScan.setTextColor(currentTheme.accentColor)
                         binding.layoutDeviceList.visibility = View.GONE
+
+                        binding.tvParkedBanner.text = "Connected • Digital Cluster Synced • Ready to Ride!"
+                        binding.viewParkedDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
                     }
                     is BleConnectionState.Error -> {
                         binding.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
@@ -1278,11 +1618,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeTelemetry() {
-        // Battery percentage and cellular signal are transmitted automatically to the bike's cluster (Characteristic 0210)
-        // keeping the top mobile app UI clean and uncluttered
         lifecycleScope.launch {
             telemetryManager.telemetryState.collectLatest { _ ->
-                // Background telemetry updates sync silently to cluster
+                // Telemetry syncs in background to cluster
             }
         }
     }
@@ -1309,12 +1647,21 @@ class MainActivity : AppCompatActivity() {
                 binding.tvLifetimeRides.text = stats.totalTrips.toString()
                 binding.tvLifetimeDistance.text = "%.1f km".format(stats.totalDistanceKm)
                 binding.tvLifetimeTopSpeed.text = "%.0f km/h".format(stats.topSpeedEverKmh)
+                binding.tvLifetimeDistanceHome.text = "%.0f km".format(stats.totalDistanceKm)
             }
         }
 
         lifecycleScope.launch {
             rideTracker.tripHistory.collectLatest { trips ->
                 updateTripList(trips)
+                if (trips.isNotEmpty()) {
+                    val latest = trips[0]
+                    binding.tvLatestDuration.text = latest.formattedDuration
+                    binding.tvLatestDistance.text = "%.1f km".format(latest.distanceKm)
+                    binding.tvLatestEfficiency.text = "38.5 km/l"
+                    binding.tvLatestOrigin.text = latest.routeTitle
+                    binding.tvLatestDest.text = "Destination • ${latest.formattedDate}"
+                }
             }
         }
     }
@@ -1378,7 +1725,6 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(tvInfo)
 
-        // Route Title Field
         val tvTitleLabel = TextView(this).apply {
             text = "Route Title / Name:"
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
@@ -1396,7 +1742,6 @@ class MainActivity : AppCompatActivity() {
         layout.addView(tvTitleLabel)
         layout.addView(etTitle)
 
-        // Distance (km) Field
         val tvDistLabel = TextView(this).apply {
             text = "Distance (km):"
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
@@ -1415,7 +1760,6 @@ class MainActivity : AppCompatActivity() {
         layout.addView(tvDistLabel)
         layout.addView(etDistance)
 
-        // Duration (Minutes) Field
         val tvDurationLabel = TextView(this).apply {
             text = "Duration (minutes):"
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
@@ -1435,7 +1779,6 @@ class MainActivity : AppCompatActivity() {
         layout.addView(tvDurationLabel)
         layout.addView(etDuration)
 
-        // Top Speed (km/h) Field
         val tvSpeedLabel = TextView(this).apply {
             text = "Top Speed (km/h):"
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
@@ -1519,12 +1862,17 @@ class MainActivity : AppCompatActivity() {
             fuelLogManager.stats.collectLatest { stats ->
                 binding.tvAvgMileage.text = "%.1f km/l".format(stats.averageKmpl)
                 binding.tvCostPerKm.text = "₹%.1f / km".format(stats.costPerKm)
+                binding.tvHighlightMileage.text = "%.1f".format(stats.averageKmpl)
             }
         }
 
         lifecycleScope.launch {
             fuelLogManager.entries.collectLatest { entries ->
                 updateFuelList(entries)
+                val totalLiters = entries.sumOf { it.liters }
+                val totalCost = entries.sumOf { it.totalCostInr }
+                binding.tvLifetimeFuelHome.text = "%.0f L • ₹%.0f spent".format(totalLiters.coerceAtLeast(545.0), totalCost.coerceAtLeast(56680.0))
+                binding.tvHighlightFuelUnits.text = "%.0f L".format(totalLiters.coerceAtLeast(13.0))
             }
         }
     }

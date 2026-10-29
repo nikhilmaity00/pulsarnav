@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:id="@+id/nav_cockpit"
-        android:icon="@drawable/ic_cockpit"
-        android:title="Cockpit" />
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_home"
+        android:title="Home" />
     <item
-        android:id="@+id/nav_trips"
-        android:icon="@drawable/ic_trips"
-        android:title="Trips" />
+        android:id="@+id/nav_fuel"
+        android:icon="@drawable/ic_fuel"
+        android:title="Fuel" />
     <item
-        android:id="@+id/nav_garage"
-        android:icon="@drawable/ic_garage"
-        android:title="Garage" />
+        android:id="@+id/nav_support"
+        android:icon="@drawable/ic_support"
+        android:title="Support" />
     <item
-        android:id="@+id/nav_settings"
-        android:icon="@drawable/ic_settings"
-        android:title="Settings" />
+        android:id="@+id/nav_account"
+        android:icon="@drawable/ic_account"
+        android:title="Account" />
 </menu>
