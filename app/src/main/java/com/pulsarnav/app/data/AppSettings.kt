@@ -37,6 +37,12 @@ class AppSettings(context: Context) {
         const val KEY_FUEL_PERCENT = "fuel_level_percent"
         const val KEY_FUEL_LITERS = "fuel_level_liters"
         const val KEY_LAST_SYNC_MS = "last_synced_timestamp_ms"
+        const val KEY_DAYS_OF_OWNERSHIP = "days_of_ownership"
+
+        const val KEY_RIDER_BLOOD_GROUP = "rider_blood_group"
+        const val KEY_EMERGENCY_CONTACT_NAME = "ice_contact_name"
+        const val KEY_EMERGENCY_CONTACT_PHONE = "ice_contact_phone"
+        const val KEY_MEDICAL_NOTES = "medical_notes"
 
         const val KEY_DOC_RC_NUMBER = "doc_rc_number"
         const val KEY_DOC_RC_PATH = "doc_rc_path"
@@ -216,6 +222,36 @@ class AppSettings(context: Context) {
         get() = prefs.getLong(KEY_LAST_SYNC_MS, System.currentTimeMillis())
         set(value) {
             prefs.edit().putLong(KEY_LAST_SYNC_MS, value).apply()
+        }
+
+    var daysOfOwnership: Int
+        get() = prefs.getInt(KEY_DAYS_OF_OWNERSHIP, 1132)
+        set(value) {
+            prefs.edit().putInt(KEY_DAYS_OF_OWNERSHIP, value).apply()
+        }
+
+    var riderBloodGroup: String
+        get() = prefs.getString(KEY_RIDER_BLOOD_GROUP, "O+ Positive") ?: "O+ Positive"
+        set(value) {
+            prefs.edit().putString(KEY_RIDER_BLOOD_GROUP, value).apply()
+        }
+
+    var emergencyContactName: String
+        get() = prefs.getString(KEY_EMERGENCY_CONTACT_NAME, "Family / ICE Contact") ?: "Family / ICE Contact"
+        set(value) {
+            prefs.edit().putString(KEY_EMERGENCY_CONTACT_NAME, value).apply()
+        }
+
+    var emergencyContactPhone: String
+        get() = prefs.getString(KEY_EMERGENCY_CONTACT_PHONE, "+91 98765 43210") ?: "+91 98765 43210"
+        set(value) {
+            prefs.edit().putString(KEY_EMERGENCY_CONTACT_PHONE, value).apply()
+        }
+
+    var medicalNotes: String
+        get() = prefs.getString(KEY_MEDICAL_NOTES, "No known drug allergies • Pulsar NS200 Rider") ?: "No known drug allergies • Pulsar NS200 Rider"
+        set(value) {
+            prefs.edit().putString(KEY_MEDICAL_NOTES, value).apply()
         }
 
     var docRcNumber: String

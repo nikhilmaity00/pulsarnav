@@ -173,6 +173,33 @@ class RideTracker private constructor(private val context: Context) {
     }
 
     /**
+     * Manually records a ride (e.g. quick local drop-off without phone navigation connected).
+     */
+    fun addManualTrip(
+        distanceKm: Double,
+        durationSec: Long,
+        topSpeedKmh: Double,
+        avgSpeedKmh: Double,
+        routeTitle: String,
+        startTimeMs: Long = System.currentTimeMillis() - (durationSec * 1000)
+    ): Trip {
+        val endTime = startTimeMs + (durationSec * 1000)
+        val computedAvg = if (avgSpeedKmh > 0) avgSpeedKmh else if (durationSec > 0) (distanceKm / (durationSec / 3600.0)) else 0.0
+        val trip = Trip(
+            id = UUID.randomUUID().toString(),
+            startTimeMs = startTimeMs,
+            endTimeMs = endTime,
+            distanceKm = distanceKm,
+            durationSec = durationSec,
+            topSpeedKmh = topSpeedKmh,
+            avgSpeedKmh = computedAvg,
+            routeTitle = routeTitle.ifBlank { "Manual Logged Ride" }
+        )
+        saveTrip(trip)
+        return trip
+    }
+
+    /**
      * Updates an existing trip's details (distance, duration, route name, speed).
      * Automatically recalculates average speed and lifetime stats.
      */

@@ -55,33 +55,73 @@ class FuelLogManager private constructor(private val context: Context) {
     val stats: StateFlow<FuelStats> = _stats.asStateFlow()
 
     fun addFuelEntry(odometerKm: Double, liters: Double, totalCostInr: Double): FuelEntry {
-        val current = _entries.value.toMutableList()
-        var calculatedKmpl: Double? = null
-
-        if (current.isNotEmpty()) {
-            val lastEntry = current[0]
-            val distanceSinceLast = (odometerKm - lastEntry.odometerKm).coerceAtLeast(0.0)
-            if (liters > 0 && distanceSinceLast > 1.0) {
-                calculatedKmpl = distanceSinceLast / liters
-            }
-        }
-
         val entry = FuelEntry(
             id = UUID.randomUUID().toString(),
             timestampMs = System.currentTimeMillis(),
             odometerKm = odometerKm,
             liters = liters,
             totalCostInr = totalCostInr,
-            calculatedKmpl = calculatedKmpl
+            calculatedKmpl = null
         )
 
+        val current = _entries.value.toMutableList()
         current.add(0, entry)
-        _entries.value = current
-        _stats.value = computeStats(current)
-        saveEntries(current)
+        val recalculated = recalculateChainedStats(current)
+        _entries.value = recalculated
+        _stats.value = computeStats(recalculated)
+        saveEntries(recalculated)
 
         MaintenanceManager.getInstance(context).setOdometer(odometerKm)
-        return entry
+        return recalculated.firstOrNull { it.id == entry.id } ?: entry
+    }
+
+    fun updateFuelEntry(id: String, odometerKm: Double, liters: Double, totalCostInr: Double): FuelEntry? {
+        val current = _entries.value.toMutableList()
+        val index = current.indexOfFirst { it.id == id }
+        if (index == -1) return null
+
+        val old = current[index]
+        val updated = old.copy(
+            odometerKm = odometerKm,
+            liters = liters,
+            totalCostInr = totalCostInr
+        )
+        current[index] = updated
+        val recalculated = recalculateChainedStats(current)
+        _entries.value = recalculated
+        _stats.value = computeStats(recalculated)
+        saveEntries(recalculated)
+        return updated
+    }
+
+    fun deleteFuelEntry(id: String): Boolean {
+        val current = _entries.value.toMutableList()
+        val removed = current.removeAll { it.id == id }
+        if (removed) {
+            val recalculated = recalculateChainedStats(current)
+            _entries.value = recalculated
+            _stats.value = computeStats(recalculated)
+            saveEntries(recalculated)
+        }
+        return removed
+    }
+
+    private fun recalculateChainedStats(list: List<FuelEntry>): List<FuelEntry> {
+        val sorted = list.sortedByDescending { it.timestampMs }
+        val result = mutableListOf<FuelEntry>()
+        for (i in sorted.indices) {
+            val item = sorted[i]
+            var kmpl: Double? = null
+            if (i < sorted.size - 1) {
+                val previous = sorted[i + 1]
+                val dist = (item.odometerKm - previous.odometerKm).coerceAtLeast(0.0)
+                if (item.liters > 0 && dist > 1.0) {
+                    kmpl = dist / item.liters
+                }
+            }
+            result.add(item.copy(calculatedKmpl = kmpl))
+        }
+        return result
     }
 
     private fun computeStats(list: List<FuelEntry>): FuelStats {

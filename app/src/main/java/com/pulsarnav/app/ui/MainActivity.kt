@@ -14,10 +14,13 @@ import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
@@ -136,6 +139,8 @@ class MainActivity : AppCompatActivity() {
         updateDocumentsSummary()
         updateServiceHistorySummary()
         updateHeroRangeDisplay()
+        updateEmergencyHomeCard()
+        updateOwnershipDays()
         setupStatsNavigation()
         setupSupportAndAccountDialogs()
         setupFeatureToggles()
@@ -652,6 +657,29 @@ class MainActivity : AppCompatActivity() {
         binding.btnAddFuel.setOnClickListener {
             provideHapticFeedback()
             showAddFuelDialog()
+        }
+
+        // Days of Ownership
+        binding.layoutDaysOfOwnership.setOnClickListener {
+            provideHapticFeedback()
+            showEditOwnershipDaysDialog()
+        }
+
+        // Add Manual Ride
+        binding.btnAddManualRide.setOnClickListener {
+            provideHapticFeedback()
+            showAddManualRideDialog()
+        }
+
+        // Emergency & Medical Assistance
+        binding.btnEmergencyHospitals.setOnClickListener {
+            launchEmergencyHospitals()
+        }
+        binding.btnEmergencyAmbulance.setOnClickListener {
+            showEmergencyAmbulanceDialog()
+        }
+        binding.layoutEmergencyRiderInfo.setOnClickListener {
+            showEmergencyMedicalDialog()
         }
     }
 
@@ -1725,6 +1753,7 @@ class MainActivity : AppCompatActivity() {
             binding.cardHeroRange,
             binding.cardConnection,
             binding.cardLastParked,
+            binding.cardEmergencyHome,
             binding.cardLatestRide,
             binding.cardLifetimeStatsHome,
             binding.cardQuickHome,
@@ -1833,6 +1862,18 @@ class MainActivity : AppCompatActivity() {
         binding.btnAddFuel.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.btnAddFuel.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnAddFuel.setTextColor(theme.accentColor)
+
+        // Emergency Assistance & Manual Ride Theming
+        binding.tvEmergencyBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvEmergencyBadge.setTextColor(theme.accentColor)
+        binding.btnEmergencyAmbulance.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnEmergencyAmbulance.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnEmergencyAmbulance.setTextColor(theme.accentColor)
+        binding.tvBloodGroupBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.tvBloodGroupBadge.setTextColor(theme.accentColor)
+        binding.tvEditMedicalLink.setTextColor(theme.accentColor)
+        binding.btnAddManualRide.setTextColor(theme.accentColor)
+        binding.btnAddManualRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
 
         binding.btnConfigHome.setTextColor(theme.accentColor)
         binding.btnConfigWork.setTextColor(theme.accentColor)
@@ -2250,7 +2291,20 @@ class MainActivity : AppCompatActivity() {
                 if (odo != null && liters != null && cost != null && liters > 0) {
                     val entry = fuelLogManager.addFuelEntry(odo, liters, cost)
                     provideHapticFeedback()
+
+                    // DIRECTLY UPDATE HOME PAGE FUEL & RANGE METRICS
+                    val currentLiters = appSettings.fuelLevelLiters
+                    val newLiters = if (checkFullTank.isChecked) 12.0f else (currentLiters + liters.toFloat()).coerceIn(0.0f, 12.0f)
+                    val newPercent = ((newLiters / 12.0f) * 100).toInt().coerceIn(0, 100)
+                    val avgMileage = fuelLogManager.stats.value.averageKmpl.coerceIn(25.0, 50.0)
+                    val newDte = (newLiters * avgMileage).toInt()
+
+                    appSettings.fuelLevelLiters = newLiters
+                    appSettings.fuelLevelPercent = newPercent
+                    appSettings.projectedDteKm = newDte
                     recordSyncTime()
+                    updateHeroRangeDisplay()
+
                     val kmplMsg = if (entry.calculatedKmpl != null) {
                         " • Mileage: %.1f km/l!".format(entry.calculatedKmpl)
                     } else {
@@ -2747,9 +2801,15 @@ class MainActivity : AppCompatActivity() {
             (view as? com.google.android.material.card.MaterialCardView)?.let { card ->
                 card.setCardBackgroundColor(currentTheme.cardColor)
                 card.strokeColor = currentTheme.cardBorderColor
+                card.isClickable = true
+                card.isFocusable = true
+                card.setOnClickListener {
+                    provideHapticFeedback()
+                    showEditFuelEntryDialog(entry)
+                }
             }
             view.findViewById<TextView>(R.id.tvFuelDate).text = entry.formattedDate
-            view.findViewById<TextView>(R.id.tvFuelOdo).text = "Odo: %.1f km • %.1f L".format(entry.odometerKm, entry.liters)
+            view.findViewById<TextView>(R.id.tvFuelOdo).text = "Odo: %.1f km • %.1f L ✏️".format(entry.odometerKm, entry.liters)
             val tvCost = view.findViewById<TextView>(R.id.tvFuelCost)
             tvCost.text = "₹%.0f".format(entry.totalCostInr)
             tvCost.setTextColor(currentTheme.accentColor)
@@ -2762,6 +2822,368 @@ class MainActivity : AppCompatActivity() {
             }
             binding.layoutFuelList.addView(view)
         }
+    }
+
+    private fun showEditFuelEntryDialog(entry: com.pulsarnav.app.maintenance.FuelEntry) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvInfo = TextView(this).apply {
+            text = "Refuel recorded on ${entry.formattedDate}\nTap Save to recalculate running economy or Delete to remove:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvInfo)
+
+        val odoInput = EditText(this).apply {
+            hint = "Odometer (km)"
+            setText("%.1f".format(entry.odometerKm))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val litersInput = EditText(this).apply {
+            hint = "Fuel Litres"
+            setText("%.2f".format(entry.liters))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val costInput = EditText(this).apply {
+            hint = "Total Cost (₹)"
+            setText("%.0f".format(entry.totalCostInr))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+
+        fun addField(label: String, field: View) {
+            val tv = TextView(this).apply {
+                text = label
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 11f
+                setPadding(0, 8, 0, 4)
+            }
+            layout.addView(tv)
+            layout.addView(field)
+        }
+
+        addField("Odometer (km):", odoInput)
+        addField("Fuel Litres:", litersInput)
+        addField("Total Amount Paid (₹):", costInput)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("✏️ Edit Refuel Entry")
+            .setView(layout)
+            .setPositiveButton("Save Changes") { _, _ ->
+                val odo = odoInput.text.toString().toDoubleOrNull()
+                val lit = litersInput.text.toString().toDoubleOrNull()
+                val cost = costInput.text.toString().toDoubleOrNull()
+                if (odo != null && lit != null && cost != null && lit > 0) {
+                    fuelLogManager.updateFuelEntry(entry.id, odo, lit, cost)
+                    recordSyncTime()
+                    updateHeroRangeDisplay()
+                    provideHapticFeedback()
+                    Toast.makeText(this, "Refuel entry updated!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNeutralButton("Delete Entry") { _, _ ->
+                fuelLogManager.deleteFuelEntry(entry.id)
+                recordSyncTime()
+                updateHeroRangeDisplay()
+                provideHapticFeedback()
+                Toast.makeText(this, "Refuel entry deleted", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateOwnershipDays() {
+        binding.tvDaysOfOwnership.text = "${appSettings.daysOfOwnership} Days ✏️"
+    }
+
+    private fun showEditOwnershipDaysDialog() {
+        val input = EditText(this).apply {
+            setText(appSettings.daysOfOwnership.toString())
+            setSelectAllOnFocus(true)
+            hint = "Days of Ownership (e.g. 1132)"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(40, 30, 40, 30)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val container = FrameLayout(this).apply {
+            setPadding(50, 20, 50, 10)
+            addView(input)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🗓️ Days of Ownership")
+            .setMessage("Update total days elapsed since taking delivery of your Pulsar NS200:")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val days = input.text.toString().toIntOrNull()
+                if (days != null && days >= 0) {
+                    appSettings.daysOfOwnership = days
+                    updateOwnershipDays()
+                    recordSyncTime()
+                    provideHapticFeedback()
+                    Toast.makeText(this, "Ownership duration updated to $days days!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showAddManualRideDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val tvHint = TextView(this).apply {
+            text = "Record a ride logged without phone navigation (e.g. local drop-off or neighborhood spin):"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvHint)
+
+        val titleInput = EditText(this).apply {
+            hint = "Trip Route / Title (e.g. Local Market Run)"
+            setText("Local Drop-off")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        val distInput = EditText(this).apply {
+            hint = "Distance in km (e.g. 4.5)"
+            setText("4.5")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val durInput = EditText(this).apply {
+            hint = "Duration in minutes (e.g. 15)"
+            setText("15")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val speedInput = EditText(this).apply {
+            hint = "Top speed in km/h (optional, e.g. 60)"
+            setText("58")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+
+        val cbOdo = com.google.android.material.checkbox.MaterialCheckBox(this).apply {
+            text = "Add distance to motorcycle odometer"
+            isChecked = true
+            textSize = 12f
+        }
+
+        fun addField(label: String, field: View) {
+            val tv = TextView(this).apply {
+                text = label
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 11f
+                setPadding(0, 8, 0, 4)
+            }
+            layout.addView(tv)
+            layout.addView(field)
+        }
+
+        addField("Route Title:", titleInput)
+        addField("Distance (km):", distInput)
+        addField("Duration (Minutes):", durInput)
+        addField("Top Speed (km/h):", speedInput)
+        layout.addView(cbOdo)
+
+        val scrollView = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🛵 Log Past / Manual Ride")
+            .setView(scrollView)
+            .setPositiveButton("Save Ride") { _, _ ->
+                val dist = distInput.text.toString().toDoubleOrNull() ?: 0.0
+                val durMin = durInput.text.toString().toLongOrNull() ?: 0L
+                val topSpeed = speedInput.text.toString().toDoubleOrNull() ?: 0.0
+                val title = titleInput.text.toString().trim().ifBlank { "Local Ride" }
+
+                if (dist > 0 && durMin > 0) {
+                    val durSec = durMin * 60
+                    val avgSpeed = (dist / (durMin / 60.0)).coerceAtLeast(0.0)
+                    rideTracker.addManualTrip(dist, durSec, topSpeed.coerceAtLeast(avgSpeed), avgSpeed, title)
+                    if (cbOdo.isChecked) {
+                        val newOdo = maintenanceManager.status.value.totalOdometerKm + dist
+                        maintenanceManager.setOdometer(newOdo)
+                    }
+                    recordSyncTime()
+                    provideHapticFeedback()
+                    Toast.makeText(this, "Logged \"$title\" (%.1f km, %d mins)".format(dist, durMin), Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Please enter valid distance and duration", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun launchEmergencyHospitals() {
+        provideHapticFeedback()
+        val uri = Uri.parse("geo:0,0?q=hospitals+emergency+near+me")
+        val mapIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage("com.google.android.apps.maps")
+        }
+        try {
+            startActivity(mapIntent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/hospitals+emergency+near+me")))
+            } catch (_: Exception) {
+                Toast.makeText(this, "Could not open Maps for nearest hospitals", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showEmergencyAmbulanceDialog() {
+        provideHapticFeedback()
+        val options = arrayOf(
+            "🚑 108 - Medical Ambulance (Free SOS)",
+            "🚨 112 - National Emergency Integrated SOS",
+            "🏥 102 - Maternity & Child Ambulance",
+            "📞 Call ICE Contact (${appSettings.emergencyContactName}: ${appSettings.emergencyContactPhone})"
+        )
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🚨 Emergency Speed Dialer")
+            .setItems(options) { _, which ->
+                provideHapticFeedback()
+                val dialNumber = when (which) {
+                    0 -> "108"
+                    1 -> "112"
+                    2 -> "102"
+                    3 -> appSettings.emergencyContactPhone.filter { it.isDigit() || it == '+' }
+                    else -> "112"
+                }
+                try {
+                    val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$dialNumber"))
+                    startActivity(dialIntent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Unable to dial $dialNumber", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showEmergencyMedicalDialog() {
+        provideHapticFeedback()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 10)
+        }
+
+        val bloodGroups = arrayOf("O+ Positive", "O- Negative", "A+ Positive", "A- Negative", "B+ Positive", "B- Negative", "AB+ Positive", "AB- Negative")
+        var selectedBloodGroup = appSettings.riderBloodGroup
+        val bloodSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, bloodGroups)
+            val idx = bloodGroups.indexOfFirst { it.equals(selectedBloodGroup, ignoreCase = true) }
+            if (idx >= 0) setSelection(idx)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    selectedBloodGroup = bloodGroups[position]
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+        }
+
+        val iceNameInput = EditText(this).apply {
+            hint = "ICE Contact Name / Relation"
+            setText(appSettings.emergencyContactName)
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+        }
+        val icePhoneInput = EditText(this).apply {
+            hint = "ICE Phone Number"
+            setText(appSettings.emergencyContactPhone)
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+        val notesInput = EditText(this).apply {
+            hint = "Medical Allergies / Conditions"
+            setText(appSettings.medicalNotes)
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+            setBackgroundResource(R.drawable.bg_obsidian_input)
+            setPadding(36, 24, 36, 24)
+            minLines = 2
+        }
+
+        fun addField(label: String, field: View) {
+            val tv = TextView(this).apply {
+                text = label
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 11f
+                setPadding(0, 8, 0, 4)
+            }
+            layout.addView(tv)
+            layout.addView(field)
+        }
+
+        addField("Rider Blood Group:", bloodSpinner)
+        addField("Emergency Contact Person (ICE):", iceNameInput)
+        addField("Emergency Contact Phone:", icePhoneInput)
+        addField("Medical Allergies / Emergency Notes:", notesInput)
+
+        val scrollView = ScrollView(this).apply { addView(layout) }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("🩸 Medical & Emergency Profile")
+            .setView(scrollView)
+            .setPositiveButton("Save Profile") { _, _ ->
+                appSettings.riderBloodGroup = selectedBloodGroup
+                appSettings.emergencyContactName = iceNameInput.text.toString().trim().ifBlank { "Family / ICE" }
+                appSettings.emergencyContactPhone = icePhoneInput.text.toString().trim().ifBlank { "112" }
+                appSettings.medicalNotes = notesInput.text.toString().trim().ifBlank { "No known allergies" }
+                updateEmergencyHomeCard()
+                recordSyncTime()
+                provideHapticFeedback()
+                Toast.makeText(this, "Emergency medical profile saved!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateEmergencyHomeCard() {
+        binding.tvBloodGroupBadge.text = "🩸 ${appSettings.riderBloodGroup}"
+        binding.tvEmergencyContactName.text = "ICE: ${appSettings.emergencyContactPhone}"
+        binding.tvEmergencyMedicalNotes.text = "${appSettings.emergencyContactName} • ${appSettings.medicalNotes}"
     }
 
     private fun getArrowForManeuver(m: Maneuver): String {
