@@ -171,7 +171,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:letterSpacing="-0.04"
-                                android:text="340"
+                                android:text="--"
                                 android:textColor="@color/text_primary"
                                 android:textSize="44sp"
                                 android:textStyle="bold" />
@@ -194,7 +194,7 @@
                                 android:id="@+id/tvDteSubtext"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="~10.2L in tank"
+                                android:text="Tap Recalibrate to sync"
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
@@ -234,7 +234,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="85% Tank Level • 10.2L / 12.0L"
+                                android:text="0% Tank Level • 0.0L / 12.0L"
                                 android:textColor="@color/text_primary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
@@ -243,7 +243,7 @@
                                 android:id="@+id/tvSyncTimeSubtext"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Synced just now"
+                                android:text="Not synced yet"
                                 android:textColor="@color/text_tertiary"
                                 android:textSize="11sp" />
                         </LinearLayout>
@@ -253,7 +253,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="8dp"
                             android:layout_marginTop="8dp"
-                            android:progress="85"
+                            android:progress="0"
                             app:indicatorColor="@color/wine_red"
                             app:trackColor="@color/surface_border"
                             app:trackCornerRadius="4dp" />
@@ -726,7 +726,7 @@
                                     android:backgroundTint="@color/wine_red_subtle"
                                     android:paddingHorizontal="8dp"
                                     android:paddingVertical="3dp"
-                                    android:text="🩸 O+ Positive"
+                                    android:text="🩸 Blood Group --"
                                     android:textColor="@color/wine_red_light"
                                     android:textSize="11sp"
                                     android:textStyle="bold" />
@@ -739,7 +739,7 @@
                                     android:layout_weight="1"
                                     android:ellipsize="end"
                                     android:maxLines="1"
-                                    android:text="ICE: +91 98765 43210"
+                                    android:text="ICE: Not Configured"
                                     android:textColor="@color/text_primary"
                                     android:textSize="12sp"
                                     android:textStyle="bold" />
@@ -761,7 +761,7 @@
                                 android:layout_marginTop="6dp"
                                 android:ellipsize="end"
                                 android:maxLines="2"
-                                android:text="No known drug allergies • Pulsar NS200 Rider"
+                                android:text="Tap to configure ICE emergency contact &amp; info"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="11sp" />
                         </LinearLayout>
@@ -774,6 +774,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="12dp"
+                    android:visibility="gone"
                     app:cardBackgroundColor="@color/surface_card"
                     app:cardCornerRadius="16dp"
                     app:cardElevation="0dp"
@@ -822,7 +823,7 @@
                                     android:layout_marginStart="10dp"
                                     android:ellipsize="end"
                                     android:maxLines="1"
-                                    android:text="C-701, Versova Marg, Andheri West"
+                                    android:text="--"
                                     android:textColor="@color/text_primary"
                                     android:textSize="13sp" />
                             </LinearLayout>
@@ -853,7 +854,7 @@
                                     android:layout_marginStart="10dp"
                                     android:ellipsize="end"
                                     android:maxLines="1"
-                                    android:text="901 Janardan, Gilbert Hill, Andheri West"
+                                    android:text="--"
                                     android:textColor="@color/text_primary"
                                     android:textSize="13sp" />
                             </LinearLayout>
@@ -1026,7 +1027,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:letterSpacing="-0.03"
-                                android:text="20 695 km"
+                                android:text="0 km"
                                 android:textColor="@color/text_primary"
                                 android:textSize="32sp"
                                 android:textStyle="bold" />
@@ -1052,7 +1053,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="545 L • ₹56,680 spent"
+                                android:text="0 L • ₹0 spent"
                                 android:textColor="@color/status_connected"
                                 android:textSize="22sp"
                                 android:textStyle="bold" />
@@ -1341,7 +1342,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
-                                    android:text="38.5 km/l"
+                                    android:text="-- km/l"
                                     android:textColor="@color/status_connected"
                                     android:textSize="18sp"
                                     android:textStyle="bold" />
@@ -1366,7 +1367,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
-                                    android:text="₹2.7 / km"
+                                    android:text="-- / km"
                                     android:textColor="@color/text_primary"
                                     android:textSize="18sp"
                                     android:textStyle="bold" />
@@ -1628,7 +1629,7 @@
                                 android:id="@+id/tvChainRemaining"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="380 km left"
+                                android:text="500 km left"
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
@@ -1647,7 +1648,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="8dp"
                             android:layout_marginTop="12dp"
-                            android:progress="76"
+                            android:progress="100"
                             app:indicatorColor="@color/wine_red"
                             app:trackColor="@color/surface_border"
                             app:trackCornerRadius="4dp" />
@@ -1706,7 +1707,7 @@
                                 android:id="@+id/tvServiceRemaining"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="4,880 km left"
+                                android:text="5,000 km left"
                                 android:textColor="@color/status_connected"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
@@ -1725,7 +1726,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="8dp"
                             android:layout_marginTop="12dp"
-                            android:progress="97"
+                            android:progress="100"
                             app:indicatorColor="@color/status_connected"
                             app:trackColor="@color/surface_border"
                             app:trackCornerRadius="4dp" />
@@ -1942,7 +1943,7 @@
                                 android:id="@+id/tvProfileName"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Nikhil Maity"
+                                android:text="Rider Profile"
                                 android:textColor="@color/text_primary"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
@@ -1996,7 +1997,7 @@
                                 android:id="@+id/tvBikeName"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Nikhil's Pulsar NS200"
+                                android:text="Pulsar NS200"
                                 android:textColor="@color/text_primary"
                                 android:textSize="15sp"
                                 android:textStyle="bold" />
@@ -2006,7 +2007,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="MH02GC2593 • BS6 DTS-i"
+                                android:text="Add Number Plate • BS6 DTS-i"
                                 android:textColor="@color/text_tertiary"
                                 android:textSize="12sp" />
                         </LinearLayout>
@@ -2148,7 +2149,7 @@
                                     android:id="@+id/tvDocumentsSubtext"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="RC, Insurance (Nov 2027), PUC (Jan 2027)"
+                                    android:text="Upload RC, Insurance &amp; PUC certificates"
                                     android:textColor="@color/text_tertiary"
                                     android:textSize="11sp" />
                             </LinearLayout>
@@ -2157,7 +2158,7 @@
                                 android:id="@+id/tvDocumentsBadge"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="3 Docs"
+                                android:text="0 Uploaded"
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
@@ -3392,7 +3393,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:letterSpacing="-0.03"
-                                    android:text="497 km"
+                                    android:text="0 km"
                                     android:textColor="@color/text_primary"
                                     android:textSize="28sp"
                                     android:textStyle="bold" />
@@ -3402,7 +3403,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginStart="8dp"
-                                    android:text="in 28 days"
+                                    android:text="this month"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="13sp" />
 
@@ -3415,7 +3416,7 @@
                                     android:id="@+id/tvTodayKmBadge"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="3 km today"
+                                    android:text="0 km today"
                                     android:textColor="#F59E0B"
                                     android:textSize="12sp"
                                     android:textStyle="bold" />
@@ -3534,7 +3535,7 @@
                                     android:id="@+id/tvHighlightFuelUnits"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="13 L"
+                                    android:text="-- L"
                                     android:textColor="@color/text_primary"
                                     android:textSize="22sp"
                                     android:textStyle="bold" />
@@ -3571,7 +3572,7 @@
                                     android:id="@+id/tvHighlightMileage"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="38.5"
+                                    android:text="--"
                                     android:textColor="@color/status_connected"
                                     android:textSize="22sp"
                                     android:textStyle="bold" />
@@ -3608,7 +3609,7 @@
                                     android:id="@+id/tvHighlightSpiritedRides"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="10"
+                                    android:text="0"
                                     android:textColor="@color/wine_red_light"
                                     android:textSize="22sp"
                                     android:textStyle="bold" />
@@ -3674,10 +3675,10 @@
                                         android:layout_weight="1" />
 
                                     <TextView
-                                        android:id="@+id/tvLifetimeDistance"
+                                        android:id="@+id/tvHighlightLongestRide"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="33.7 km"
+                                        android:text="-- km"
                                         android:textColor="#FFFFFF"
                                         android:textSize="20sp"
                                         android:textStyle="bold" />
@@ -3720,9 +3721,10 @@
                                         android:layout_weight="1" />
 
                                     <TextView
+                                        android:id="@+id/tvLifetimeLongestCruise"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="17.6 km"
+                                        android:text="-- mins"
                                         android:textColor="#FFFFFF"
                                         android:textSize="20sp"
                                         android:textStyle="bold" />
@@ -3767,7 +3769,7 @@
                                         android:id="@+id/tvLifetimeTopSpeed"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="128 km/h"
+                                        android:text="-- km/h"
                                         android:textColor="#FFFFFF"
                                         android:textSize="20sp"
                                         android:textStyle="bold" />
@@ -3868,7 +3870,7 @@
                                     android:id="@+id/tvOdometer"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="20 695 km"
+                                    android:text="0.0 km"
                                     android:textColor="@color/wine_red_light"
                                     android:textSize="14sp"
                                     android:textStyle="bold" />
@@ -3898,7 +3900,7 @@
                                     android:id="@+id/tvLifetimeRides"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="14"
+                                    android:text="0"
                                     android:textColor="@color/text_primary"
                                     android:textSize="14sp"
                                     android:textStyle="bold" />

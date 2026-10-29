@@ -58,7 +58,7 @@ class MaintenanceManager private constructor(private val context: Context) {
     val status: StateFlow<MaintenanceStatus> = _status.asStateFlow()
 
     private fun computeStatus(): MaintenanceStatus {
-        val odo = prefs.getString(KEY_ODO, "120.0")?.toDoubleOrNull() ?: 120.0
+        val odo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
         val lastLube = prefs.getString(KEY_LAST_CHAIN_LUBE, "0.0")?.toDoubleOrNull() ?: 0.0
         val lastService = prefs.getString(KEY_LAST_SERVICE, "0.0")?.toDoubleOrNull() ?: 0.0
 
@@ -82,7 +82,7 @@ class MaintenanceManager private constructor(private val context: Context) {
     }
 
     fun addDistance(km: Double) {
-        val currentOdo = prefs.getString(KEY_ODO, "120.0")?.toDoubleOrNull() ?: 120.0
+        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
         val newOdo = currentOdo + km
         prefs.edit().putString(KEY_ODO, "%.1f".format(newOdo)).apply()
         _status.value = computeStatus()
@@ -94,13 +94,13 @@ class MaintenanceManager private constructor(private val context: Context) {
     }
 
     fun markChainLubed() {
-        val currentOdo = prefs.getString(KEY_ODO, "120.0")?.toDoubleOrNull() ?: 120.0
+        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
         prefs.edit().putString(KEY_LAST_CHAIN_LUBE, currentOdo.toString()).apply()
         _status.value = computeStatus()
     }
 
     fun markServiceDone() {
-        val currentOdo = prefs.getString(KEY_ODO, "120.0")?.toDoubleOrNull() ?: 120.0
+        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
         prefs.edit().putString(KEY_LAST_SERVICE, currentOdo.toString()).apply()
         _status.value = computeStatus()
     }
@@ -108,35 +108,7 @@ class MaintenanceManager private constructor(private val context: Context) {
     fun getServiceHistory(): MutableList<ServiceRecord> {
         val raw = prefs.getString(KEY_SERVICE_HISTORY_JSON, null)
         if (raw.isNullOrBlank()) {
-            return mutableListOf(
-                ServiceRecord(
-                    id = "init_1",
-                    date = "15 Jan 2026",
-                    odoKm = 500.0,
-                    title = "1st Free Service (500 km)",
-                    workshop = "Bajaj Authorized Service",
-                    notes = "Engine oil flush, chain adjustment, fastener check",
-                    cost = "₹0"
-                ),
-                ServiceRecord(
-                    id = "init_2",
-                    date = "12 May 2026",
-                    odoKm = 4500.0,
-                    title = "2nd Free Service (4,500 km)",
-                    workshop = "Bajaj Authorized Service",
-                    notes = "Engine oil replacement, oil filter, brake cleaning",
-                    cost = "₹350"
-                ),
-                ServiceRecord(
-                    id = "init_3",
-                    date = "18 Sep 2026",
-                    odoKm = 9500.0,
-                    title = "3rd Free Service (9,500 km)",
-                    workshop = "Bajaj Authorized Service",
-                    notes = "Periodic service, spark plug check, coolant top-up",
-                    cost = "₹420"
-                )
-            )
+            return mutableListOf()
         }
 
         val list = mutableListOf<ServiceRecord>()

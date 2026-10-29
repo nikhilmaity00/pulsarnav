@@ -125,7 +125,7 @@ class FuelLogManager private constructor(private val context: Context) {
     }
 
     private fun computeStats(list: List<FuelEntry>): FuelStats {
-        if (list.isEmpty()) return FuelStats(38.5, 0.0, 2.7) // NS200 default average 38-40 km/l
+        if (list.isEmpty()) return FuelStats(0.0, 0.0, 0.0)
 
         var totalSpent = 0.0
         var totalLiters = 0.0
@@ -141,9 +141,9 @@ class FuelLogManager private constructor(private val context: Context) {
             }
         }
 
-        val avgKmpl = if (validKmplCount > 0) kmplSum / validKmplCount else 38.5
-        val totalDistance = if (list.size > 1) (list.first().odometerKm - list.last().odometerKm).coerceAtLeast(1.0) else 50.0
-        val costPerKm = if (totalDistance > 0) totalSpent / totalDistance else 2.7
+        val avgKmpl = if (validKmplCount > 0) kmplSum / validKmplCount else 0.0
+        val totalDistance = if (list.size > 1) (list.first().odometerKm - list.last().odometerKm).coerceAtLeast(1.0) else 0.0
+        val costPerKm = if (totalDistance > 0) totalSpent / totalDistance else 0.0
 
         return FuelStats(avgKmpl, totalSpent, costPerKm)
     }

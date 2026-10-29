@@ -175,68 +175,61 @@ class AppSettings(context: Context) {
         }
 
     var bikeName: String
-        get() = prefs.getString(KEY_BIKE_NAME, "Nikhil's Pulsar NS200") ?: "Nikhil's Pulsar NS200"
+        get() = prefs.getString(KEY_BIKE_NAME, "Pulsar NS200") ?: "Pulsar NS200"
         set(value) {
             prefs.edit().putString(KEY_BIKE_NAME, value).apply()
         }
 
     var bikeRegNumber: String
-        get() = prefs.getString(KEY_BIKE_REG, "MH02GC2593") ?: "MH02GC2593"
+        get() = prefs.getString(KEY_BIKE_REG, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_BIKE_REG, value).apply()
         }
 
     var bikeModelSpec: String
-        get() = prefs.getString(KEY_BIKE_SPEC, "BS6 DTS-i 4V Liquid-Cooled") ?: "BS6 DTS-i 4V Liquid-Cooled"
+        get() = prefs.getString(KEY_BIKE_SPEC, "BS6 DTS-i 200cc") ?: "BS6 DTS-i 200cc"
         set(value) {
             prefs.edit().putString(KEY_BIKE_SPEC, value).apply()
         }
 
     var riderName: String
-        get() = prefs.getString(KEY_RIDER_NAME, "Nikhil Maity") ?: "Nikhil Maity"
+        get() = prefs.getString(KEY_RIDER_NAME, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_RIDER_NAME, value).apply()
         }
 
     var riderPhone: String
-        get() = prefs.getString(KEY_RIDER_PHONE, "+91 98765 43210") ?: "+91 98765 43210"
+        get() = prefs.getString(KEY_RIDER_PHONE, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_RIDER_PHONE, value).apply()
         }
 
     var projectedDteKm: Int
-        get() = prefs.getInt(KEY_PROJECTED_DTE, 340)
+        get() = prefs.getInt(KEY_PROJECTED_DTE, 0)
         set(value) {
             prefs.edit().putInt(KEY_PROJECTED_DTE, value).apply()
         }
 
     var fuelLevelPercent: Int
-        get() = prefs.getInt(KEY_FUEL_PERCENT, 85)
+        get() = prefs.getInt(KEY_FUEL_PERCENT, 0)
         set(value) {
             prefs.edit().putInt(KEY_FUEL_PERCENT, value).apply()
         }
 
     var fuelLevelLiters: Float
-        get() = prefs.getFloat(KEY_FUEL_LITERS, 10.2f)
+        get() = prefs.getFloat(KEY_FUEL_LITERS, 0.0f)
         set(value) {
             prefs.edit().putFloat(KEY_FUEL_LITERS, value).apply()
         }
 
     var lastSyncedTimestampMs: Long
-        get() = prefs.getLong(KEY_LAST_SYNC_MS, System.currentTimeMillis())
+        get() = prefs.getLong(KEY_LAST_SYNC_MS, 0L)
         set(value) {
             prefs.edit().putLong(KEY_LAST_SYNC_MS, value).apply()
         }
 
     var purchaseDateMs: Long
-        get() {
-            val savedMs = prefs.getLong(KEY_PURCHASE_DATE_MS, 0L)
-            if (savedMs > 0L) return savedMs
-            val legacyDays = prefs.getInt(KEY_DAYS_OF_OWNERSHIP, 1132)
-            val computed = System.currentTimeMillis() - (legacyDays.toLong() * 86400000L)
-            prefs.edit().putLong(KEY_PURCHASE_DATE_MS, computed).apply()
-            return computed
-        }
+        get() = prefs.getLong(KEY_PURCHASE_DATE_MS, System.currentTimeMillis())
         set(value) {
             prefs.edit().putLong(KEY_PURCHASE_DATE_MS, value).apply()
         }
@@ -251,31 +244,31 @@ class AppSettings(context: Context) {
         get() = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(purchaseDateMs))
 
     var riderBloodGroup: String
-        get() = prefs.getString(KEY_RIDER_BLOOD_GROUP, "O+ Positive") ?: "O+ Positive"
+        get() = prefs.getString(KEY_RIDER_BLOOD_GROUP, "Not Specified") ?: "Not Specified"
         set(value) {
             prefs.edit().putString(KEY_RIDER_BLOOD_GROUP, value).apply()
         }
 
     var emergencyContactName: String
-        get() = prefs.getString(KEY_EMERGENCY_CONTACT_NAME, "Family / ICE Contact") ?: "Family / ICE Contact"
+        get() = prefs.getString(KEY_EMERGENCY_CONTACT_NAME, "Emergency Contact") ?: "Emergency Contact"
         set(value) {
             prefs.edit().putString(KEY_EMERGENCY_CONTACT_NAME, value).apply()
         }
 
     var emergencyContactPhone: String
-        get() = prefs.getString(KEY_EMERGENCY_CONTACT_PHONE, "+91 98765 43210") ?: "+91 98765 43210"
+        get() = prefs.getString(KEY_EMERGENCY_CONTACT_PHONE, "112") ?: "112"
         set(value) {
             prefs.edit().putString(KEY_EMERGENCY_CONTACT_PHONE, value).apply()
         }
 
     var medicalNotes: String
-        get() = prefs.getString(KEY_MEDICAL_NOTES, "No known drug allergies • Pulsar NS200 Rider") ?: "No known drug allergies • Pulsar NS200 Rider"
+        get() = prefs.getString(KEY_MEDICAL_NOTES, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_MEDICAL_NOTES, value).apply()
         }
 
     var docRcNumber: String
-        get() = prefs.getString(KEY_DOC_RC_NUMBER, "MH02GC2593") ?: "MH02GC2593"
+        get() = prefs.getString(KEY_DOC_RC_NUMBER, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_DOC_RC_NUMBER, value).apply()
         }
@@ -287,13 +280,13 @@ class AppSettings(context: Context) {
         }
 
     var docInsurancePolicy: String
-        get() = prefs.getString(KEY_DOC_INSURANCE_POLICY, "Bajaj Allianz Drive Assure") ?: "Bajaj Allianz Drive Assure"
+        get() = prefs.getString(KEY_DOC_INSURANCE_POLICY, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_DOC_INSURANCE_POLICY, value).apply()
         }
 
     var docInsuranceExpiry: String
-        get() = prefs.getString(KEY_DOC_INSURANCE_EXPIRY, "15 Nov 2027") ?: "15 Nov 2027"
+        get() = prefs.getString(KEY_DOC_INSURANCE_EXPIRY, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_DOC_INSURANCE_EXPIRY, value).apply()
         }
@@ -305,13 +298,13 @@ class AppSettings(context: Context) {
         }
 
     var docPucCert: String
-        get() = prefs.getString(KEY_DOC_PUC_CERT, "MH02-PUC-9482") ?: "MH02-PUC-9482"
+        get() = prefs.getString(KEY_DOC_PUC_CERT, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_DOC_PUC_CERT, value).apply()
         }
 
     var docPucExpiry: String
-        get() = prefs.getString(KEY_DOC_PUC_EXPIRY, "18 Jan 2027") ?: "18 Jan 2027"
+        get() = prefs.getString(KEY_DOC_PUC_EXPIRY, "") ?: ""
         set(value) {
             prefs.edit().putString(KEY_DOC_PUC_EXPIRY, value).apply()
         }

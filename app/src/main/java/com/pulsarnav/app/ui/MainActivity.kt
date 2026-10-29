@@ -25,6 +25,7 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
@@ -117,6 +118,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -282,6 +293,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSyncTimeDisplay() {
         val syncMs = appSettings.lastSyncedTimestampMs
+        if (syncMs <= 0L) {
+            binding.tvSyncTimeSubtext.text = "Not synced yet • Tap Recalibrate"
+            return
+        }
         val elapsedMinutes = ((System.currentTimeMillis() - syncMs) / (60 * 1000)).coerceAtLeast(0)
         val text = when {
             elapsedMinutes < 1 -> "Synced just now"
@@ -299,36 +314,55 @@ class MainActivity : AppCompatActivity() {
         val fuelPercent = appSettings.fuelLevelPercent
         val fuelLiters = appSettings.fuelLevelLiters
 
-        binding.tvProjectedRange.text = dteKm.toString()
-        binding.tvDteSubtext.text = "~${"%.1f".format(fuelLiters)}L in tank"
-        binding.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${"%.1f".format(fuelLiters)}L / 12.0L"
-        binding.progressFuelLevel.progress = fuelPercent
+        if (dteKm <= 0 && fuelPercent <= 0) {
+            binding.tvProjectedRange.text = "--"
+            binding.tvDteSubtext.text = "Tap Recalibrate to sync"
+            binding.tvFuelLevelText.text = "0% Tank Level • 0.0L / 12.0L"
+            binding.progressFuelLevel.progress = 0
+        } else {
+            binding.tvProjectedRange.text = dteKm.toString()
+            binding.tvDteSubtext.text = "~${"%.1f".format(fuelLiters)}L in tank"
+            binding.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${"%.1f".format(fuelLiters)}L / 12.0L"
+            binding.progressFuelLevel.progress = fuelPercent
+        }
 
         updateSyncTimeDisplay()
     }
 
     private fun updateBikeInfoDisplay() {
-        binding.tvBikeName.text = appSettings.bikeName
-        binding.tvBikeReg.text = "${appSettings.bikeRegNumber} • ${appSettings.bikeModelSpec}"
-        binding.tvProfileName.text = appSettings.riderName
+        binding.tvBikeName.text = appSettings.bikeName.ifBlank { "Pulsar NS200" }
+        binding.tvBikeReg.text = if (appSettings.bikeRegNumber.isNotBlank()) {
+            "${appSettings.bikeRegNumber} • ${appSettings.bikeModelSpec}"
+        } else {
+            "Add Number Plate • ${appSettings.bikeModelSpec}"
+        }
+        binding.tvProfileName.text = appSettings.riderName.ifBlank { "Rider Profile" }
     }
 
     private fun updateDocumentsSummary() {
-        val rc = appSettings.docRcNumber
-        val ins = appSettings.docInsuranceExpiry
-        val puc = appSettings.docPucExpiry
+        val rc = appSettings.docRcNumber.ifBlank { "No RC" }
+        val ins = appSettings.docInsuranceExpiry.ifBlank { "No Ins" }
+        val puc = appSettings.docPucExpiry.ifBlank { "No PUC" }
         val hasRc = appSettings.docRcPath.isNotBlank() && File(appSettings.docRcPath).exists()
         val hasIns = appSettings.docInsurancePath.isNotBlank() && File(appSettings.docInsurancePath).exists()
         val hasPuc = appSettings.docPucPath.isNotBlank() && File(appSettings.docPucPath).exists()
         val uploadedCount = listOf(hasRc, hasIns, hasPuc).count { it }
 
-        binding.tvDocumentsSubtext.text = "RC ($rc) • Ins ($ins) • PUC ($puc)"
-        binding.tvDocumentsBadge.text = if (uploadedCount > 0) "$uploadedCount Uploaded" else "3 Docs"
+        binding.tvDocumentsSubtext.text = if (appSettings.docRcNumber.isNotBlank() || uploadedCount > 0) {
+            "RC ($rc) • Ins ($ins) • PUC ($puc)"
+        } else {
+            "Upload RC, Insurance & PUC certificates"
+        }
+        binding.tvDocumentsBadge.text = if (uploadedCount > 0) "$uploadedCount Uploaded" else "0 Uploaded"
     }
 
     private fun updateServiceHistorySummary() {
         val count = maintenanceManager.getServiceHistory().size
-        binding.tvServiceHistorySummary.text = "$count services recorded • Tap to view & edit"
+        binding.tvServiceHistorySummary.text = if (count > 0) {
+            "$count services recorded • Tap to view & edit"
+        } else {
+            "0 services recorded • Tap to log service"
+        }
     }
 
     private fun showQuickDteEditDialog() {
@@ -975,6 +1009,16 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, 16)
         }
         layout.addView(tvSummary)
+
+        if (records.isEmpty()) {
+            val tvEmpty = TextView(this).apply {
+                text = "No service records logged yet.\nTap 'Log New Service' below to record vehicle maintenance."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 13f
+                setPadding(10, 20, 10, 30)
+            }
+            layout.addView(tvEmpty)
+        }
 
         for (rec in records) {
             val card = com.google.android.material.card.MaterialCardView(this).apply {
@@ -1843,7 +1887,7 @@ class MainActivity : AppCompatActivity() {
         binding.tvWhatsAppAlertBanner.setTextColor(theme.accentColor)
 
         // Riding Stats Elements
-        binding.tvLifetimeDistance.setTextColor(theme.accentColor)
+        binding.tvHighlightLongestRide.setTextColor(Color.WHITE)
         binding.btnSimulateRide.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.btnSimulateRide.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnSimulateRide.setTextColor(theme.accentColor)
@@ -2559,8 +2603,6 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             rideTracker.lifetimeStats.collectLatest { stats ->
                 binding.tvLifetimeRides.text = stats.totalTrips.toString()
-                binding.tvLifetimeDistance.text = "%.1f km".format(stats.totalDistanceKm)
-                binding.tvLifetimeTopSpeed.text = "%.0f km/h".format(stats.topSpeedEverKmh)
                 binding.tvLifetimeDistanceHome.text = "%.0f km".format(stats.totalDistanceKm)
             }
         }
@@ -2569,14 +2611,101 @@ class MainActivity : AppCompatActivity() {
             rideTracker.tripHistory.collectLatest { trips ->
                 updateTripList(trips)
                 if (trips.isNotEmpty()) {
+                    binding.cardLatestRide.visibility = View.VISIBLE
                     val latest = trips[0]
                     binding.tvLatestDuration.text = latest.formattedDuration
                     binding.tvLatestDistance.text = "%.1f km".format(latest.distanceKm)
-                    binding.tvLatestEfficiency.text = "38.5 km/l"
+                    val fuelStats = fuelLogManager.stats.value
+                    binding.tvLatestEfficiency.text = if (fuelStats.averageKmpl > 0.0) "%.1f km/l".format(fuelStats.averageKmpl) else "-- km/l"
                     binding.tvLatestOrigin.text = latest.routeTitle
                     binding.tvLatestDest.text = "Destination • ${latest.formattedDate}"
+                } else {
+                    binding.cardLatestRide.visibility = View.GONE
                 }
+                updateHighlightsAndMonthlyStats(trips)
             }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateHighlightsAndMonthlyStats(trips: List<Trip>) {
+        val longestKm = trips.maxOfOrNull { it.distanceKm } ?: 0.0
+        binding.tvHighlightLongestRide.text = if (longestKm > 0.0) "%.1f km".format(longestKm) else "-- km"
+
+        val longestCruiseSec = trips.maxOfOrNull { it.durationSec } ?: 0L
+        val longestMins = longestCruiseSec / 60
+        binding.tvLifetimeLongestCruise.text = if (longestMins > 0L) "$longestMins mins" else "-- mins"
+
+        val topSpeed = trips.maxOfOrNull { it.topSpeedKmh } ?: 0.0
+        binding.tvLifetimeTopSpeed.text = if (topSpeed > 0.0) "%.0f km/h".format(topSpeed) else "-- km/h"
+
+        val spiritedCount = trips.count { it.topSpeedKmh >= 70.0 }
+        binding.tvHighlightSpiritedRides.text = spiritedCount.toString()
+
+        val cal = Calendar.getInstance()
+        val curMonth = cal.get(Calendar.MONTH)
+        val curYear = cal.get(Calendar.YEAR)
+        val todayDay = cal.get(Calendar.DAY_OF_YEAR)
+
+        val monthTrips = trips.filter { t ->
+            val c = Calendar.getInstance().apply { timeInMillis = t.startTimeMs }
+            c.get(Calendar.MONTH) == curMonth && c.get(Calendar.YEAR) == curYear
+        }
+        val monthKm = monthTrips.sumOf { it.distanceKm }
+        binding.tvMonthDistance.text = "%.0f km".format(monthKm)
+
+        val activeDays = monthTrips.map { t ->
+            Calendar.getInstance().apply { timeInMillis = t.startTimeMs }.get(Calendar.DAY_OF_MONTH)
+        }.distinct().size
+        binding.tvMonthDays.text = if (activeDays > 0) "in $activeDays days" else "this month"
+
+        val todayTrips = trips.filter { t ->
+            val c = Calendar.getInstance().apply { timeInMillis = t.startTimeMs }
+            c.get(Calendar.DAY_OF_YEAR) == todayDay && c.get(Calendar.YEAR) == curYear
+        }
+        val todayKm = todayTrips.sumOf { it.distanceKm }
+        binding.tvTodayKmBadge.text = "%.0f km today".format(todayKm)
+
+        // Populate 7-day bar chart dynamically
+        binding.chartBarContainer.removeAllViews()
+        val dayTotals = DoubleArray(7)
+        val now = Calendar.getInstance()
+        for (i in 6 downTo 0) {
+            val dCal = Calendar.getInstance().apply {
+                timeInMillis = now.timeInMillis
+                add(Calendar.DAY_OF_YEAR, -i)
+            }
+            val dDay = dCal.get(Calendar.DAY_OF_YEAR)
+            val dYr = dCal.get(Calendar.YEAR)
+            val km = trips.filter { t ->
+                val c = Calendar.getInstance().apply { timeInMillis = t.startTimeMs }
+                c.get(Calendar.DAY_OF_YEAR) == dDay && c.get(Calendar.YEAR) == dYr
+            }.sumOf { it.distanceKm }
+            dayTotals[6 - i] = km
+        }
+
+        val maxDayKm = dayTotals.maxOrNull() ?: 0.0
+        for (i in 0 until 7) {
+            val km = dayTotals[i]
+            val isToday = (i == 6)
+            val heightDp = if (maxDayKm > 0.0) {
+                (12 + (km / maxDayKm * 68)).toInt()
+            } else {
+                8
+            }
+            val bar = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(14), dpToPx(heightDp)).apply {
+                    setMargins(dpToPx(6), 0, dpToPx(6), 0)
+                }
+                setBackgroundResource(R.drawable.pill_badge)
+                val color = when {
+                    isToday && km > 0.0 -> Color.parseColor("#F59E0B")
+                    km > 0.0 -> Color.WHITE
+                    else -> ContextCompat.getColor(this@MainActivity, R.color.surface_elevated)
+                }
+                backgroundTintList = ColorStateList.valueOf(color)
+            }
+            binding.chartBarContainer.addView(bar)
         }
     }
 
@@ -2776,9 +2905,18 @@ class MainActivity : AppCompatActivity() {
     private fun observeFuelLog() {
         lifecycleScope.launch {
             fuelLogManager.stats.collectLatest { stats ->
-                binding.tvAvgMileage.text = "%.1f km/l".format(stats.averageKmpl)
-                binding.tvCostPerKm.text = "₹%.1f / km".format(stats.costPerKm)
-                binding.tvHighlightMileage.text = "%.1f".format(stats.averageKmpl)
+                if (stats.averageKmpl > 0.0) {
+                    binding.tvAvgMileage.text = "%.1f km/l".format(stats.averageKmpl)
+                    binding.tvHighlightMileage.text = "%.1f".format(stats.averageKmpl)
+                } else {
+                    binding.tvAvgMileage.text = "-- km/l"
+                    binding.tvHighlightMileage.text = "--"
+                }
+                if (stats.costPerKm > 0.0) {
+                    binding.tvCostPerKm.text = "₹%.1f / km".format(stats.costPerKm)
+                } else {
+                    binding.tvCostPerKm.text = "-- / km"
+                }
             }
         }
 
@@ -2787,8 +2925,8 @@ class MainActivity : AppCompatActivity() {
                 updateFuelList(entries)
                 val totalLiters = entries.sumOf { it.liters }
                 val totalCost = entries.sumOf { it.totalCostInr }
-                binding.tvLifetimeFuelHome.text = "%.0f L • ₹%.0f spent".format(totalLiters.coerceAtLeast(545.0), totalCost.coerceAtLeast(56680.0))
-                binding.tvHighlightFuelUnits.text = "%.0f L".format(totalLiters.coerceAtLeast(13.0))
+                binding.tvLifetimeFuelHome.text = "%.0f L • ₹%.0f spent".format(totalLiters, totalCost)
+                binding.tvHighlightFuelUnits.text = if (totalLiters > 0.0) "%.0f L".format(totalLiters) else "-- L"
             }
         }
     }
@@ -2796,6 +2934,16 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetTextI18n")
     private fun updateFuelList(entries: List<com.pulsarnav.app.maintenance.FuelEntry>) {
         binding.layoutFuelList.removeAllViews()
+        if (entries.isEmpty()) {
+            val emptyView = TextView(this).apply {
+                text = "No refuel records yet. Tap 'Log Refueling' above to track fuel & economy."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
+                textSize = 13f
+                setPadding(10, 20, 10, 20)
+            }
+            binding.layoutFuelList.addView(emptyView)
+            return
+        }
         for (entry in entries) {
             val view = LayoutInflater.from(this).inflate(R.layout.item_fuel, binding.layoutFuelList, false)
             (view as? com.google.android.material.card.MaterialCardView)?.let { card ->
@@ -3182,9 +3330,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateEmergencyHomeCard() {
-        binding.tvBloodGroupBadge.text = "🩸 ${appSettings.riderBloodGroup}"
-        binding.tvEmergencyContactName.text = "ICE: ${appSettings.emergencyContactPhone}"
-        binding.tvEmergencyMedicalNotes.text = "${appSettings.emergencyContactName} • ${appSettings.medicalNotes}"
+        val blood = if (appSettings.riderBloodGroup.isNotBlank() && appSettings.riderBloodGroup != "Not Specified") "🩸 ${appSettings.riderBloodGroup}" else "🩸 Blood Group --"
+        binding.tvBloodGroupBadge.text = blood
+        val icePhone = appSettings.emergencyContactPhone
+        binding.tvEmergencyContactName.text = if (icePhone.isNotBlank()) "ICE: $icePhone" else "ICE: Not Configured"
+        val iceName = appSettings.emergencyContactName
+        val med = appSettings.medicalNotes
+        binding.tvEmergencyMedicalNotes.text = when {
+            iceName.isNotBlank() && med.isNotBlank() -> "$iceName • $med"
+            iceName.isNotBlank() -> iceName
+            med.isNotBlank() -> med
+            else -> "Tap to configure ICE emergency contact & info"
+        }
     }
 
     private fun getArrowForManeuver(m: Maneuver): String {
