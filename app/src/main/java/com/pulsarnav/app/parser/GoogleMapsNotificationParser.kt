@@ -1,101 +1,219 @@
 package com.pulsarnav.app.parser
 
+import android.os.Bundle
 import com.pulsarnav.app.model.Maneuver
+import java.util.Calendar
+import java.util.regex.Pattern
 
 data class ParsedNavigationStep(
     val maneuver: Maneuver,
     val distanceMeters: Int,
+    val totalDistanceMeters: Int,
     val streetName: String,
     val rawDistanceText: String,
-    val etaMinutes: Int
+    val etaHour: Int,
+    val etaMinute: Int,
+    val etaIsAm: Boolean
 )
 
 object GoogleMapsNotificationParser {
 
-    private val KM_REGEX = "([0-9]+[.,]?[0-9]*)\\s*(?:km|kilometers)".toRegex(RegexOption.IGNORE_CASE)
-    private val M_REGEX = "([0-9]+)\\s*(?:m|meters)(?!in)".toRegex(RegexOption.IGNORE_CASE)
-    private val MI_REGEX = "([0-9]+[.,]?[0-9]*)\\s*(?:mi|miles)".toRegex(RegexOption.IGNORE_CASE)
-    private val FT_REGEX = "([0-9]+)\\s*(?:ft|feet)".toRegex(RegexOption.IGNORE_CASE)
-    private val ETA_MIN_REGEX = "([0-9]+)\\s*min".toRegex(RegexOption.IGNORE_CASE)
+    private val DIST_REGEX = Pattern.compile("(?i)(\\d+(?:[.,]\\d+)?)\\s*(km|mi|ft|yd|m)\\b")
+    private val CLOCK_REGEX = Pattern.compile("(\\d{1,2}):(\\d{2})(?:\\s*([ap]m))?", Pattern.CASE_INSENSITIVE)
+    private val ETA_MIN_REGEX = Pattern.compile("(\\d+)\\s*min", Pattern.CASE_INSENSITIVE)
+    private val ETA_HR_REGEX = Pattern.compile("(\\d+)\\s*(?:hr|hour)", Pattern.CASE_INSENSITIVE)
 
-    fun parse(title: String?, text: String?, subtext: String?): ParsedNavigationStep? {
-        val fullContent = "${title.orEmpty()} ${text.orEmpty()} ${subtext.orEmpty()}".lowercase()
-        if (fullContent.isBlank()) return null
+    fun parse(
+        title: String?,
+        text: String?,
+        subtext: String?,
+        iconObj: Any? = null
+    ): ParsedNavigationStep? {
+        val sTitle = title?.trim().orEmpty()
+        val sText = text?.trim().orEmpty()
+        val sSubtext = subtext?.trim().orEmpty()
 
-        // 1. Extract Distance
-        var distanceMeters = 0
-        var rawDist = ""
-
-        val kmMatch = KM_REGEX.find(fullContent)
-        val mMatch = M_REGEX.find(fullContent)
-        val miMatch = MI_REGEX.find(fullContent)
-        val ftMatch = FT_REGEX.find(fullContent)
-
-        when {
-            kmMatch != null -> {
-                rawDist = kmMatch.value
-                val num = kmMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
-                distanceMeters = (num * 1000).toInt()
-            }
-            mMatch != null -> {
-                rawDist = mMatch.value
-                distanceMeters = mMatch.groupValues[1].toIntOrNull() ?: 0
-            }
-            miMatch != null -> {
-                rawDist = miMatch.value
-                val num = miMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
-                distanceMeters = (num * 1609.34).toInt()
-            }
-            ftMatch != null -> {
-                rawDist = ftMatch.value
-                val num = ftMatch.groupValues[1].toIntOrNull() ?: 0
-                distanceMeters = (num * 0.3048).toInt()
-            }
+        if (sTitle.isBlank() && sText.isBlank() && sSubtext.isBlank()) return null
+        if (sTitle.isEmpty() && sSubtext.isEmpty() && sText.contains("rerout", ignoreCase = true)) {
+            return null // Rerouting
         }
 
-        // 2. Extract Maneuver
-        val maneuver = when {
-            fullContent.contains("destination") || fullContent.contains("arrived") -> Maneuver.DESTINATION_REACHED
-            fullContent.contains("u-turn") || fullContent.contains("uturn") -> {
-                if (fullContent.contains("left")) Maneuver.U_TURN_LEFT else Maneuver.U_TURN_RIGHT
-            }
-            fullContent.contains("roundabout") || fullContent.contains("rotary") -> {
-                if (fullContent.contains("left")) Maneuver.ROUNDABOUT_LEFT else Maneuver.ROUNDABOUT_RIGHT
-            }
-            fullContent.contains("sharp left") -> Maneuver.TURN_SHARP_LEFT
-            fullContent.contains("sharp right") -> Maneuver.TURN_SHARP_RIGHT
-            fullContent.contains("slight left") || fullContent.contains("bear left") -> Maneuver.TURN_SLIGHT_LEFT
-            fullContent.contains("slight right") || fullContent.contains("bear right") -> Maneuver.TURN_SLIGHT_RIGHT
-            fullContent.contains("keep left") -> Maneuver.KEEP_LEFT
-            fullContent.contains("keep right") -> Maneuver.KEEP_RIGHT
-            fullContent.contains("fork") && fullContent.contains("left") -> Maneuver.FORK_LEFT
-            fullContent.contains("fork") && fullContent.contains("right") -> Maneuver.FORK_RIGHT
-            fullContent.contains("ramp") && fullContent.contains("left") -> Maneuver.RAMP_LEFT
-            fullContent.contains("ramp") && fullContent.contains("right") -> Maneuver.RAMP_RIGHT
-            fullContent.contains("turn left") || fullContent.contains("take a left") || fullContent.contains("left onto") -> Maneuver.TURN_LEFT
-            fullContent.contains("turn right") || fullContent.contains("take a right") || fullContent.contains("right onto") -> Maneuver.TURN_RIGHT
-            fullContent.contains("merge") -> Maneuver.MERGE
-            else -> Maneuver.STRAIGHT
+        // 1. Distances
+        var stepDist = parseDistanceMeters(sTitle)
+        if (stepDist < 0) {
+            stepDist = parseDistanceMeters(sText)
         }
-
-        // 3. Extract Street / Road Name
-        var street = text.orEmpty().trim()
-        if (street.startsWith("toward ", ignoreCase = true)) {
-            street = street.substring(7)
-        } else if (street.startsWith("onto ", ignoreCase = true)) {
-            street = street.substring(5)
+        var totalDist = parseDistanceMeters(sSubtext)
+        if (totalDist < 0) {
+            totalDist = stepDist.coerceAtLeast(0)
         }
+        stepDist = stepDist.coerceAtLeast(0)
 
-        // 4. Extract ETA
-        val etaMatch = ETA_MIN_REGEX.find(fullContent)
-        val etaMinutes = etaMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        // 2. Maneuver Classification
+        val fullContent = "$sTitle $sText $sSubtext".lowercase()
+        var classifiedManeuver = classifyFromText(fullContent)
+
+        if (classifiedManeuver == null && iconObj != null) {
+            val match = ManeuverMatcher.match(iconObj)
+            if (match != null && match.score >= 0.60) {
+                classifiedManeuver = match.maneuver
+            }
+        }
+        val finalManeuver = classifiedManeuver ?: Maneuver.STRAIGHT
+
+        // 3. Street / Instruction
+        val cleanStreet = cleanStreetName(sText, sTitle)
+
+        // 4. ETA Time / Clock
+        val clock = parseEtaClock(sSubtext)
+        val etaHour: Int
+        val etaMinute: Int
+        val etaIsAm: Boolean
+
+        if (clock != null) {
+            etaHour = clock.hour
+            etaMinute = clock.minute
+            etaIsAm = clock.isAm
+        } else {
+            val cal = Calendar.getInstance()
+            val totalSeconds = parseEtaSeconds(sSubtext)
+            if (totalSeconds > 0) {
+                cal.add(Calendar.SECOND, totalSeconds)
+            }
+            etaIsAm = (cal.get(Calendar.AM_PM) == Calendar.AM)
+            var h = cal.get(Calendar.HOUR)
+            if (h == 0) h = 12
+            etaHour = h
+            etaMinute = cal.get(Calendar.MINUTE)
+        }
 
         return ParsedNavigationStep(
-            maneuver = maneuver,
-            distanceMeters = distanceMeters,
-            streetName = street,
-            rawDistanceText = rawDist,
-            etaMinutes = etaMinutes
+            maneuver = finalManeuver,
+            distanceMeters = stepDist,
+            totalDistanceMeters = totalDist,
+            streetName = cleanStreet,
+            rawDistanceText = sTitle,
+            etaHour = etaHour,
+            etaMinute = etaMinute,
+            etaIsAm = etaIsAm
         )
+    }
+
+    private fun classifyFromText(s: String): Maneuver? {
+        if (s.isEmpty()) return null
+
+        if (s.contains("destination") || s.contains("arrived") || s.contains("reached")) {
+            return Maneuver.DESTINATION_REACHED
+        }
+
+        val hasDirection = s.contains("turn left") || s.contains("turn right") ||
+                s.contains("left onto") || s.contains("right onto") ||
+                s.contains("keep left") || s.contains("keep right") ||
+                s.contains("slight") || s.contains("sharp") ||
+                s.contains("roundabout") || s.contains("rotary") ||
+                s.contains("fork") || s.contains("merge") ||
+                s.contains("u-turn") || s.contains("uturn") ||
+                s.contains("ramp")
+
+        if (!hasDirection) return null
+
+        return when {
+            s.contains("roundabout") || s.contains("rotary") -> {
+                if (s.contains("right")) Maneuver.ROUNDABOUT_RIGHT else Maneuver.ROUNDABOUT_LEFT
+            }
+            s.contains("u-turn") || s.contains("uturn") -> {
+                if (s.contains("right")) Maneuver.U_TURN_RIGHT else Maneuver.U_TURN_LEFT
+            }
+            s.contains("sharp left") -> Maneuver.TURN_SHARP_LEFT
+            s.contains("sharp right") -> Maneuver.TURN_SHARP_RIGHT
+            s.contains("slight left") || s.contains("bear left") -> Maneuver.TURN_SLIGHT_LEFT
+            s.contains("slight right") || s.contains("bear right") -> Maneuver.TURN_SLIGHT_RIGHT
+            s.contains("keep left") -> Maneuver.KEEP_LEFT
+            s.contains("keep right") -> Maneuver.KEEP_RIGHT
+            s.contains("fork") && s.contains("left") -> Maneuver.FORK_LEFT
+            s.contains("fork") && s.contains("right") -> Maneuver.FORK_RIGHT
+            s.contains("ramp") && s.contains("left") -> Maneuver.RAMP_LEFT
+            s.contains("ramp") && s.contains("right") -> Maneuver.RAMP_RIGHT
+            s.contains("turn left") || s.contains("left onto") || s.contains("take a left") -> Maneuver.TURN_LEFT
+            s.contains("turn right") || s.contains("right onto") || s.contains("take a right") -> Maneuver.TURN_RIGHT
+            s.contains("merge") -> Maneuver.MERGE
+            else -> null
+        }
+    }
+
+    private fun parseDistanceMeters(s: String): Int {
+        if (s.isEmpty()) return -1
+        val m = DIST_REGEX.matcher(s)
+        if (!m.find()) return -1
+
+        val numStr = m.group(1)?.replace(',', '.') ?: return -1
+        val num = numStr.toDoubleOrNull() ?: return -1
+        val unit = m.group(2)?.lowercase() ?: return -1
+
+        return when (unit) {
+            "m" -> num.toInt()
+            "km" -> (num * 1000.0).toInt()
+            "mi" -> (num * 1609.34).toInt()
+            "ft" -> (num * 0.3048).toInt()
+            "yd" -> (num * 0.9144).toInt()
+            else -> -1
+        }
+    }
+
+    private data class EtaClock(val hour: Int, val minute: Int, val isAm: Boolean)
+
+    private fun parseEtaClock(s: String): EtaClock? {
+        if (s.isEmpty()) return null
+        val m = CLOCK_REGEX.matcher(s)
+        if (!m.find()) return null
+
+        var h = m.group(1)?.toIntOrNull() ?: return null
+        val min = m.group(2)?.toIntOrNull() ?: return null
+        val ampm = m.group(3)?.lowercase()
+
+        val isAm = when (ampm) {
+            "am" -> true
+            "pm" -> false
+            else -> {
+                // 24-hour fallback
+                val am = h < 12
+                if (h == 0) h = 12
+                else if (h > 12) h -= 12
+                return EtaClock(h, min, am)
+            }
+        }
+        if (h == 0) h = 12
+        return EtaClock(h, min, isAm)
+    }
+
+    private fun parseEtaSeconds(s: String): Int {
+        if (s.isEmpty()) return -1
+        var sec = 0
+        var found = false
+
+        val mHr = ETA_HR_REGEX.matcher(s)
+        if (mHr.find()) {
+            val hr = mHr.group(1)?.toIntOrNull() ?: 0
+            sec += hr * 3600
+            found = true
+        }
+
+        val mMin = ETA_MIN_REGEX.matcher(s)
+        if (mMin.find()) {
+            val min = mMin.group(1)?.toIntOrNull() ?: 0
+            sec += min * 60
+            found = true
+        }
+
+        return if (found) sec else -1
+    }
+
+    private fun cleanStreetName(text: String, title: String): String {
+        var s = text.trim()
+        if (s.startsWith("toward ", ignoreCase = true)) s = s.substring(7)
+        if (s.startsWith("onto ", ignoreCase = true)) s = s.substring(5)
+        if (s.startsWith("on ", ignoreCase = true)) s = s.substring(3)
+        if (s.isBlank()) s = title.trim()
+        return s.replace(Regex("[^0-9a-zA-Z.]"), " ").trim()
     }
 }

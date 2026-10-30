@@ -3006,6 +3006,21 @@
                         app:strokeWidth="1dp" />
                 </LinearLayout>
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnStopSimulation"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginBottom="16dp"
+                    android:backgroundTint="@color/surface_elevated"
+                    android:text="⏹  Stop Simulation / Clear Cluster"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/surface_border"
+                    app:strokeWidth="1dp" />
+
                 <!-- Caller ID & Handlebar Test Bench Card -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardCallerId"

@@ -1,6 +1,8 @@
 package com.pulsarnav.app.service
 
 import android.app.Notification
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
@@ -8,6 +10,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.pulsarnav.app.ble.BajajBleManager
 import com.pulsarnav.app.parser.GoogleMapsNotificationParser
+import com.pulsarnav.app.parser.ManeuverMatcher
 import com.pulsarnav.app.parser.ParsedNavigationStep
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +28,13 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
         private const val WHATSAPP_PACKAGE = "com.whatsapp"
         private const val WHATSAPP_REVERT_DELAY_MS = 6000L
 
+        private val ICON_KEYS = arrayOf(
+            Notification.EXTRA_LARGE_ICON,
+            "android.ongoingActivityNoti.chipIcon",
+            "android.ongoingActivityNoti.nowbarIcon",
+            "android.ongoingActivityNoti.secondIcon"
+        )
+
         private val _currentNavStep = MutableStateFlow<ParsedNavigationStep?>(null)
         val currentNavStep: StateFlow<ParsedNavigationStep?> = _currentNavStep
 
@@ -41,19 +51,20 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
         val activeStep = _currentNavStep.value
         val bleManager = BajajBleManager.getInstance(applicationContext)
         if (activeStep != null) {
-            Log.d(TAG, "Reverting cluster display back to active turn navigation")
-            bleManager.sendNavigationStep(
-                maneuver = activeStep.maneuver,
-                distanceMeters = activeStep.distanceMeters,
-                streetName = activeStep.streetName,
-                etaMinutes = activeStep.etaMinutes
-            )
+            Log.d(TAG, "Reverting cluster display back to active navigation stream")
+            bleManager.updateNavigationStep(activeStep)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        ManeuverMatcher.prime(this)
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         _isServiceActive.value = true
+        ManeuverMatcher.prime(this)
         Log.i(TAG, "Notification Listener connected (Google Maps TBT + WhatsApp Alerts)")
     }
 
@@ -73,7 +84,6 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
                     handleWhatsAppNotification(sbn)
                 }
             }
-            // SMS and all other apps are strictly excluded
         }
     }
 
@@ -81,34 +91,49 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
 
+        // Verify it is an ongoing navigation notification
+        if (!isNavigationNotification(notification, extras)) return
+
         val title = extras.getString(Notification.EXTRA_TITLE)
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         val subtext = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
 
-        Log.d(TAG, "Google Maps TBT: title='$title', text='$text', subtext='$subtext'")
+        val iconObj = extractIconObject(extras)
 
-        val parsedStep = GoogleMapsNotificationParser.parse(title, text, subtext) ?: return
+        val parsedStep = GoogleMapsNotificationParser.parse(title, text, subtext, iconObj) ?: return
         _currentNavStep.value = parsedStep
 
+        Log.d(TAG, "Google Maps TBT: ${parsedStep.maneuver.description} in ${parsedStep.distanceMeters}m on ${parsedStep.streetName}")
+
         val bleManager = BajajBleManager.getInstance(applicationContext)
-        bleManager.sendNavigationStep(
-            maneuver = parsedStep.maneuver,
-            distanceMeters = parsedStep.distanceMeters,
-            streetName = parsedStep.streetName,
-            etaMinutes = parsedStep.etaMinutes
-        )
+        bleManager.updateNavigationStep(parsedStep)
+    }
+
+    private fun isNavigationNotification(n: Notification, ex: Bundle): Boolean {
+        if (Notification.CATEGORY_NAVIGATION == n.category) return true
+        if (n.category?.contains("nav", ignoreCase = true) == true) return true
+        return ex.containsKey("android.subText")
+    }
+
+    private fun extractIconObject(ex: Bundle): Any? {
+        for (key in ICON_KEYS) {
+            val obj = try {
+                ex.get(key)
+            } catch (_: Exception) {
+                null
+            }
+            if (obj != null) return obj
+        }
+        return null
     }
 
     private fun handleWhatsAppNotification(sbn: StatusBarNotification) {
         val notification = sbn.notification ?: return
-
-        // Filter out background/ongoing notifications (e.g. WhatsApp Web active, backups)
         if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
 
         val extras = notification.extras ?: return
         val senderTitle = extras.getString(Notification.EXTRA_TITLE) ?: return
 
-        // Ignore generic system status titles
         if (senderTitle.contains("WhatsApp", ignoreCase = true) ||
             senderTitle.contains("Checking for new messages", ignoreCase = true) ||
             senderTitle.contains("messages from", ignoreCase = true)) {
@@ -118,11 +143,9 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
         Log.i(TAG, "WhatsApp message alert intercepted from: $senderTitle")
         _lastWhatsAppAlert.value = WhatsAppAlertInfo(senderTitle)
 
-        // Send 44-byte WhatsApp alert packet to cluster characteristic 0410
         val bleManager = BajajBleManager.getInstance(applicationContext)
         bleManager.sendWhatsAppAlert(senderTitle)
 
-        // User preference: Revert back to navigation after 6 seconds
         mainHandler.removeCallbacks(revertToNavigationRunnable)
         mainHandler.postDelayed(revertToNavigationRunnable, WHATSAPP_REVERT_DELAY_MS)
     }
@@ -130,7 +153,9 @@ class GoogleMapsNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn?.packageName == GOOGLE_MAPS_PACKAGE) {
             _currentNavStep.value = null
-            Log.i(TAG, "Google Maps navigation ended or notification removed")
+            Log.i(TAG, "Google Maps navigation ended -> sending stop frame")
+            val bleManager = BajajBleManager.getInstance(applicationContext)
+            bleManager.stopNavigation()
         }
     }
 }

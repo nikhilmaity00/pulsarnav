@@ -56,6 +56,7 @@ import com.pulsarnav.app.telephony.CallManager
 import com.pulsarnav.app.tracking.RideTracker
 import com.pulsarnav.app.tracking.Trip
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 data class CockpitTheme(
@@ -626,21 +627,49 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Turn simulation test bench
+        // Turn simulation test bench (Continuous ~800ms stream to motorcycle cluster)
         binding.btnTestLeft.setOnClickListener {
             provideHapticFeedback()
-            updateNavDisplay(Maneuver.TURN_LEFT, "250 m", "Left onto MG Road", 14)
-            bleManager.sendNavigationStep(Maneuver.TURN_LEFT, 250, "Left onto MG Road", 14)
+            if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_LEFT) {
+                bleManager.stopSimulation()
+                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+            } else {
+                bleManager.startSimulation(Maneuver.TURN_LEFT, 250, "Left onto MG Road")
+                updateNavDisplay(Maneuver.TURN_LEFT, "250 m", "Left onto MG Road", "14 min ETA")
+                Toast.makeText(this, "Simulating Left Turn on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+            }
         }
         binding.btnTestStraight.setOnClickListener {
             provideHapticFeedback()
-            updateNavDisplay(Maneuver.STRAIGHT, "750 m", "Western Express Highway", 11)
-            bleManager.sendNavigationStep(Maneuver.STRAIGHT, 750, "Western Express Highway", 11)
+            if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.STRAIGHT) {
+                bleManager.stopSimulation()
+                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+            } else {
+                bleManager.startSimulation(Maneuver.STRAIGHT, 750, "Western Express Highway")
+                updateNavDisplay(Maneuver.STRAIGHT, "750 m", "Western Express Highway", "11 min ETA")
+                Toast.makeText(this, "Simulating Straight on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+            }
         }
         binding.btnTestRight.setOnClickListener {
             provideHapticFeedback()
-            updateNavDisplay(Maneuver.TURN_RIGHT, "150 m", "Right onto Link Road", 8)
-            bleManager.sendNavigationStep(Maneuver.TURN_RIGHT, 150, "Right onto Link Road", 8)
+            if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_RIGHT) {
+                bleManager.stopSimulation()
+                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+            } else {
+                bleManager.startSimulation(Maneuver.TURN_RIGHT, 150, "Right onto Link Road")
+                updateNavDisplay(Maneuver.TURN_RIGHT, "150 m", "Right onto Link Road", "8 min ETA")
+                Toast.makeText(this, "Simulating Right Turn on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        binding.btnStopSimulation.setOnClickListener {
+            provideHapticFeedback()
+            bleManager.stopSimulation()
+            bleManager.stopNavigation()
+            binding.tvDistance.text = "-- m"
+            binding.tvStreetName.text = "Navigation stopped"
+            binding.tvManeuverIcon.text = "⏹"
+            binding.tvEtaBadge.text = "Idle"
+            Toast.makeText(this, "Simulation Stopped & Cluster Cleared", Toast.LENGTH_SHORT).show()
         }
 
         // Call & WhatsApp simulation
@@ -1991,6 +2020,10 @@ class MainActivity : AppCompatActivity() {
             btn.strokeColor = ColorStateList.valueOf(theme.borderColor)
             btn.setTextColor(theme.accentColor)
         }
+        binding.btnStopSimulation.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnStopSimulation.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnStopSimulation.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+        updateSimulationUiState(bleManager.isSimulationRunning.value, bleManager.currentActiveManeuver.value)
 
         // Refresh stats tabs pill chips with current theme
         selectStatsTab(if (binding.layoutStatsHighlights.visibility == View.VISIBLE) binding.tabStatsHighlights else binding.tabStatsAllRides)
@@ -2571,8 +2604,14 @@ class MainActivity : AppCompatActivity() {
                 if (step != null) {
                     val dist = step.rawDistanceText.ifBlank { "${step.distanceMeters} m" }
                     val street = step.streetName.ifBlank { step.maneuver.description }
-                    updateNavDisplay(step.maneuver, dist, street, step.etaMinutes)
-                } else {
+                    val etaStr = if (step.etaHour > 0) {
+                        val ampm = if (step.etaIsAm) "AM" else "PM"
+                        "ETA %d:%02d %s".format(step.etaHour, step.etaMinute, ampm)
+                    } else {
+                        "Active Route"
+                    }
+                    updateNavDisplay(step.maneuver, dist, street, etaStr)
+                } else if (!bleManager.isSimulationRunning.value) {
                     binding.tvDistance.text = "-- m"
                     binding.tvStreetName.text = "Waiting for Google Maps..."
                     binding.tvManeuverIcon.text = "⬆"
@@ -2580,13 +2619,66 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        lifecycleScope.launch {
+            combine(bleManager.isSimulationRunning, bleManager.currentActiveManeuver) { running, maneuver ->
+                Pair(running, maneuver)
+            }.collectLatest { (running, maneuver) ->
+                updateSimulationUiState(running, maneuver)
+            }
+        }
     }
 
-    private fun updateNavDisplay(m: Maneuver, distText: String, street: String, eta: Int) {
+    private fun updateNavDisplay(m: Maneuver, distText: String, street: String, etaText: String) {
         binding.tvDistance.text = distText
         binding.tvStreetName.text = street
         binding.tvManeuverIcon.text = getArrowForManeuver(m)
-        binding.tvEtaBadge.text = if (eta > 0) "$eta min ETA" else "Active Route"
+        binding.tvEtaBadge.text = etaText
+    }
+
+    private fun updateSimulationUiState(running: Boolean, maneuver: Maneuver?) {
+        val theme = currentTheme
+        val defaultSubtle = ColorStateList.valueOf(theme.subtleColor)
+        val defaultBorder = ColorStateList.valueOf(theme.borderColor)
+        val defaultText = theme.accentColor
+
+        val activeTint = ColorStateList.valueOf(theme.primaryColor)
+        val activeText = theme.onPrimaryColor
+
+        if (running && maneuver == Maneuver.TURN_LEFT) {
+            binding.btnTestLeft.backgroundTintList = activeTint
+            binding.btnTestLeft.setTextColor(activeText)
+        } else {
+            binding.btnTestLeft.backgroundTintList = defaultSubtle
+            binding.btnTestLeft.strokeColor = defaultBorder
+            binding.btnTestLeft.setTextColor(defaultText)
+        }
+
+        if (running && maneuver == Maneuver.STRAIGHT) {
+            binding.btnTestStraight.backgroundTintList = activeTint
+            binding.btnTestStraight.setTextColor(activeText)
+        } else {
+            binding.btnTestStraight.backgroundTintList = defaultSubtle
+            binding.btnTestStraight.strokeColor = defaultBorder
+            binding.btnTestStraight.setTextColor(defaultText)
+        }
+
+        if (running && maneuver == Maneuver.TURN_RIGHT) {
+            binding.btnTestRight.backgroundTintList = activeTint
+            binding.btnTestRight.setTextColor(activeText)
+        } else {
+            binding.btnTestRight.backgroundTintList = defaultSubtle
+            binding.btnTestRight.strokeColor = defaultBorder
+            binding.btnTestRight.setTextColor(defaultText)
+        }
+
+        if (running) {
+            binding.btnStopSimulation.strokeColor = ColorStateList.valueOf(theme.accentColor)
+            binding.btnStopSimulation.setTextColor(theme.accentColor)
+        } else {
+            binding.btnStopSimulation.strokeColor = defaultBorder
+            binding.btnStopSimulation.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+        }
     }
 
     private fun observeTelephonyAndAlerts() {

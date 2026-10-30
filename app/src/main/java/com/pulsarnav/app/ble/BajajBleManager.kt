@@ -8,11 +8,13 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import com.pulsarnav.app.model.Maneuver
+import com.pulsarnav.app.parser.ParsedNavigationStep
 import com.pulsarnav.app.protocol.CallState
 import com.pulsarnav.app.protocol.OtcPacketBuilder
 import com.pulsarnav.app.telephony.CallManager
@@ -37,8 +39,10 @@ data class DiscoveredBike(
 )
 
 private data class QueuedWrite(
-    val characteristicUuid: UUID,
-    val data: ByteArray
+    val characteristic: BluetoothGattCharacteristic,
+    val data: ByteArray,
+    val writeType: Int,
+    var attempts: Int = 0
 )
 
 @SuppressLint("MissingPermission")
@@ -50,14 +54,17 @@ class BajajBleManager private constructor(private val context: Context) {
         private const val PREF_LAST_BIKE_ADDR = "last_connected_bike_address"
         private const val PREF_LAST_BIKE_NAME = "last_connected_bike_name"
 
-        // Official OTC Engineering Bluetooth Service & Characteristic UUIDs
+        // Official OTC Engineering / Bajaj Bluetooth Service & Characteristic UUIDs
         val OTC_SERVICE_UUID: UUID = UUID.fromString("0010676e-6972-6565-6e69-676e4543544f")
         val TBT_NAV_CHAR_UUID: UUID = UUID.fromString("0110676e-6972-6565-6e69-676e4543544f")
         val GENERAL_CHAR_UUID: UUID = UUID.fromString("0210676e-6972-6565-6e69-676e4543544f")
         val MISSED_CALL_CHAR_UUID: UUID = UUID.fromString("0310676e-6972-6565-6e69-676e4543544f")
         val ALERTS_CHAR_UUID: UUID = UUID.fromString("0410676e-6972-6565-6e69-676e4543544f")
         val BUTTON_CONTROL_CHAR_UUID: UUID = UUID.fromString("0a10676e-6972-6565-6e69-676e4543544f")
-        val CCCD_DESCRIPTOR_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+        private const val TBT_STREAM_CADENCE_MS = 800L
+        private const val GEN_HEARTBEAT_PERIOD_MS = 5000L
+        private const val CTL_POLL_MS = 700L
 
         private val BIKE_NAME_PATTERNS = listOf("pulsar", "rouser", "dominar", "ns200", "ns160", "n250", "f250", "otc", "bajaj")
 
@@ -80,15 +87,11 @@ class BajajBleManager private constructor(private val context: Context) {
     private var isWriting = false
     private var userRequestedDisconnect = false
 
-    private val writeTimeoutRunnable = Runnable {
-        if (isWriting) {
-            Log.w(TAG, "GATT write timeout watchdog triggered. Resetting write lock.")
-            isWriting = false
-            processNextWrite()
-        }
-    }
+    @Volatile
+    var isLinkReady: Boolean = false
+        private set
 
-    // Characteristic references
+    // Characteristics
     private var tbtCharacteristic: BluetoothGattCharacteristic? = null
     private var generalCharacteristic: BluetoothGattCharacteristic? = null
     private var missedCallCharacteristic: BluetoothGattCharacteristic? = null
@@ -96,28 +99,112 @@ class BajajBleManager private constructor(private val context: Context) {
     private var buttonCharacteristic: BluetoothGattCharacteristic? = null
 
     private val writeQueue = ConcurrentLinkedQueue<QueuedWrite>()
+    private var ctlReadPending = false
 
+    // State flows
     private val _connectionState = MutableStateFlow<BleConnectionState>(BleConnectionState.Disconnected)
     val connectionState: StateFlow<BleConnectionState> = _connectionState
 
     private val _discoveredBikes = MutableStateFlow<List<DiscoveredBike>>(emptyList())
     val discoveredBikes: StateFlow<List<DiscoveredBike>> = _discoveredBikes
 
+    private val _lastSentPacketHex = MutableStateFlow<String?>(null)
+    val lastSentPacketHex: StateFlow<String?> = _lastSentPacketHex
+
     private val _lastSentPacket = MutableStateFlow<ByteArray?>(null)
     val lastSentPacket: StateFlow<ByteArray?> = _lastSentPacket
 
-    // Telemetry & Call cache
-    private var currentBattery = 100
-    private var currentCharging = false
+    private val _isSimulationRunning = MutableStateFlow(false)
+    val isSimulationRunning: StateFlow<Boolean> = _isSimulationRunning
+
+    private val _currentActiveManeuver = MutableStateFlow<Maneuver?>(null)
+    val currentActiveManeuver: StateFlow<Maneuver?> = _currentActiveManeuver
+
+    // Telemetry cache
+    private var currentBattery = 85
+    private var currentVolume = 8
     private var currentSignal = 4
     private var currentCallState = CallState.NO_CALL
     private var currentCallerName: String? = null
-    private var currentCallerNumber: String? = null
     private var currentMissedCount = 0
 
-    private var isButtonCurrentlyPressed = false
+    // Control button edge tracking (Pulsar handlebar buttons)
+    private var lastControlBytes: ByteArray? = null
+    private var bootstrappedControls = false
+    private var callAcceptCount = 0
+    private var callRejectCount = 0
 
-    // BLE Scanner Callback
+    // Active Navigation / Simulation stream
+    private var activeNavStep: ParsedNavigationStep? = null
+    private var isNavigationActive = false
+
+    // Runnables
+    private val tbtStreamRunnable = object : Runnable {
+        override fun run() {
+            if (_isSimulationRunning.value || (isLinkReady && isNavigationActive)) {
+                val step = activeNavStep
+                if (step != null) {
+                    val frame = OtcPacketBuilder.buildTbtFrame(
+                        type = 1,
+                        maneuverIcon = step.maneuver.opcode.toInt(),
+                        isAm = step.etaIsAm,
+                        stepMeters = step.distanceMeters,
+                        totalMeters = step.totalDistanceMeters,
+                        etaHour = step.etaHour,
+                        etaMinute = step.etaMinute,
+                        roundaboutExit = 0,
+                        streetText = step.streetName
+                    )
+                    _lastSentPacket.value = frame
+                    _lastSentPacketHex.value = OtcPacketBuilder.toHex(frame)
+                    if (isLinkReady) {
+                        tbtCharacteristic?.let { enqueueWrite(it, frame) }
+                    }
+                }
+                mainHandler.postDelayed(this, TBT_STREAM_CADENCE_MS)
+            }
+        }
+    }
+
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            if (isLinkReady && bluetoothGatt != null) {
+                dispatchGeneralPacket()
+                mainHandler.postDelayed(this, GEN_HEARTBEAT_PERIOD_MS)
+            }
+        }
+    }
+
+    private val ctlPollRunnable = object : Runnable {
+        override fun run() {
+            if (isLinkReady && buttonCharacteristic != null && bluetoothGatt != null) {
+                // Read control characteristic only when write queue is idle to avoid GATT collision
+                if (!isWriting && writeQueue.isEmpty() && !ctlReadPending) {
+                    ctlReadPending = true
+                    try {
+                        val ok = bluetoothGatt?.readCharacteristic(buttonCharacteristic) ?: false
+                        if (!ok) ctlReadPending = false
+                    } catch (e: Exception) {
+                        ctlReadPending = false
+                    }
+                }
+                mainHandler.postDelayed(this, CTL_POLL_MS)
+            }
+        }
+    }
+
+    private val writeTimeoutWatchdog = Runnable {
+        if (isWriting) {
+            Log.w(TAG, "GATT write timeout watchdog triggered. Resetting lock.")
+            isWriting = false
+            processNextWrite()
+        }
+    }
+
+    // =========================================================================
+    // Scanning & Connection
+    // =========================================================================
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.let { handleScanResult(it) }
@@ -128,14 +215,14 @@ class BajajBleManager private constructor(private val context: Context) {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "Scan failed with error: $errorCode")
+            Log.e(TAG, "BLE Scan failed: code $errorCode")
             _connectionState.value = BleConnectionState.Error("Scan failed: error code $errorCode")
         }
     }
 
     private fun handleScanResult(result: ScanResult) {
         val device = result.device
-        val name = device.name ?: "Unknown Bike"
+        val name = device.name ?: result.scanRecord?.deviceName ?: "Unknown Bike"
         val lowerName = name.lowercase()
 
         val isBajajBike = BIKE_NAME_PATTERNS.any { lowerName.contains(it) } ||
@@ -152,11 +239,10 @@ class BajajBleManager private constructor(private val context: Context) {
             }
             _discoveredBikes.value = current
 
-            // Seamless Auto-Connect if matching last paired bike
             val savedAddress = prefs.getString(PREF_LAST_BIKE_ADDR, null)
             if (savedAddress != null && savedAddress.equals(device.address, ignoreCase = true) &&
                 _connectionState.value is BleConnectionState.Scanning) {
-                Log.i(TAG, "Recognized saved bike: $name ($savedAddress) -> Initiating Auto-Connect")
+                Log.i(TAG, "Recognized saved motorcycle: $name ($savedAddress) -> Auto-connecting")
                 connect(device)
             }
         }
@@ -172,7 +258,7 @@ class BajajBleManager private constructor(private val context: Context) {
         _discoveredBikes.value = emptyList()
         _connectionState.value = BleConnectionState.Scanning
 
-        val scanner = adapter.bluetoothLeScanner
+        val scanner = adapter.bluetoothLeScanner ?: return
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
@@ -184,8 +270,7 @@ class BajajBleManager private constructor(private val context: Context) {
         try {
             scanner.startScan(filters, settings, scanCallback)
             mainHandler.postDelayed({ stopScan() }, 15000)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting filtered scan: ${e.message}, falling back to open scan")
+        } catch (_: Exception) {
             try {
                 scanner.startScan(scanCallback)
                 mainHandler.postDelayed({ stopScan() }, 15000)
@@ -201,9 +286,7 @@ class BajajBleManager private constructor(private val context: Context) {
             if (_connectionState.value is BleConnectionState.Scanning) {
                 _connectionState.value = BleConnectionState.Disconnected
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping scan: ${e.message}")
-        }
+        } catch (_: Exception) {}
     }
 
     fun connect(device: BluetoothDevice) {
@@ -211,7 +294,6 @@ class BajajBleManager private constructor(private val context: Context) {
         userRequestedDisconnect = false
         val deviceName = device.name ?: "Bajaj Pulsar NS200"
 
-        // Persist bike for automatic background reconnection
         prefs.edit()
             .putString(PREF_LAST_BIKE_ADDR, device.address)
             .putString(PREF_LAST_BIKE_NAME, deviceName)
@@ -220,105 +302,379 @@ class BajajBleManager private constructor(private val context: Context) {
         _connectionState.value = BleConnectionState.Connecting(deviceName)
 
         mainHandler.post {
-            bluetoothGatt?.close()
+            closeGatt()
             bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         }
     }
 
     fun disconnect() {
         userRequestedDisconnect = true
-        mainHandler.removeCallbacks(writeTimeoutRunnable)
-        writeQueue.clear()
-        isWriting = false
-        bluetoothGatt?.disconnect()
-        bluetoothGatt?.close()
-        bluetoothGatt = null
-        clearCharacteristics()
+        stopNavigation()
+        stopSimulation()
+        mainHandler.removeCallbacks(heartbeatRunnable)
+        mainHandler.removeCallbacks(ctlPollRunnable)
+        mainHandler.removeCallbacks(writeTimeoutWatchdog)
+        closeGatt()
         _connectionState.value = BleConnectionState.Disconnected
     }
 
-    private fun clearCharacteristics() {
+    private fun closeGatt() {
+        isLinkReady = false
+        isWriting = false
+        ctlReadPending = false
+        writeQueue.clear()
+        bootstrappedControls = false
+        lastControlBytes = null
+
         tbtCharacteristic = null
         generalCharacteristic = null
         missedCallCharacteristic = null
         alertsCharacteristic = null
         buttonCharacteristic = null
+
+        bluetoothGatt?.let { g ->
+            try { g.disconnect() } catch (_: Exception) {}
+            try { g.close() } catch (_: Exception) {}
+        }
+        bluetoothGatt = null
+    }
+
+    // =========================================================================
+    // GATT Callbacks
+    // =========================================================================
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val device = gatt.device
+            val name = device.name ?: "Bajaj Pulsar NS200"
+
+            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG, "Connected to $name ($device.address), requesting priority & discovering services...")
+                _connectionState.value = BleConnectionState.Connected(name, device.address)
+                com.pulsarnav.app.data.AppSettings.getInstance(context).lastConnectedBikeMac = device.address
+
+                try {
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_BALANCED)
+                } catch (_: Exception) {}
+
+                mainHandler.postDelayed({ gatt.discoverServices() }, 350)
+                com.pulsarnav.app.tracking.RideTracker.getInstance(context).onBikeConnected()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                Log.w(TAG, "Disconnected from $name (status=$status)")
+                val wasConnected = isLinkReady || _connectionState.value is BleConnectionState.Connected
+                closeGatt()
+                _connectionState.value = BleConnectionState.Disconnected
+
+                val trip = com.pulsarnav.app.tracking.RideTracker.getInstance(context).onBikeDisconnected()
+                if (trip != null) {
+                    com.pulsarnav.app.maintenance.MaintenanceManager.getInstance(context).addDistance(trip.distanceKm)
+                }
+                com.pulsarnav.app.location.ParkingManager.getInstance(context).onBikeDisconnected()
+
+                // Auto-reconnect if not manual disconnect
+                val savedAddress = prefs.getString(PREF_LAST_BIKE_ADDR, null)
+                if (!userRequestedDisconnect && savedAddress != null && wasConnected) {
+                    mainHandler.postDelayed({
+                        if (!userRequestedDisconnect && _connectionState.value is BleConnectionState.Disconnected) {
+                            try {
+                                bluetoothAdapter?.getRemoteDevice(savedAddress)?.let { connect(it) }
+                            } catch (_: Exception) {}
+                        }
+                    }, 4000)
+                }
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.w(TAG, "onServicesDiscovered error status=$status")
+                return
+            }
+
+            val service = gatt.getService(OTC_SERVICE_UUID)
+            if (service != null) {
+                tbtCharacteristic = service.getCharacteristic(TBT_NAV_CHAR_UUID)
+                generalCharacteristic = service.getCharacteristic(GENERAL_CHAR_UUID)
+                missedCallCharacteristic = service.getCharacteristic(MISSED_CALL_CHAR_UUID)
+                alertsCharacteristic = service.getCharacteristic(ALERTS_CHAR_UUID)
+                buttonCharacteristic = service.getCharacteristic(BUTTON_CONTROL_CHAR_UUID)
+
+                Log.i(TAG, "Discovered Bajaj GATT Services. Negotiating MTU 256...")
+
+                // Critical: Request MTU 256 for 48B TBT frames and 89B General status frames
+                try {
+                    val requested = gatt.requestMtu(256)
+                    Log.i(TAG, "requestMtu(256) returned: $requested")
+                } catch (e: Exception) {
+                    Log.w(TAG, "requestMtu exception: ${e.message}")
+                }
+
+                // Fallback timer in case onMtuChanged callback is not emitted by cluster
+                mainHandler.postDelayed({
+                    if (!isLinkReady && bluetoothGatt != null) {
+                        Log.w(TAG, "MTU callback timed out — marking link ready via fallback")
+                        onLinkReady("mtu-fallback")
+                    }
+                }, 2500)
+            } else {
+                Log.e(TAG, "Bajaj Service UUID $OTC_SERVICE_UUID not found!")
+            }
+        }
+
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            Log.i(TAG, "onMtuChanged: mtu=$mtu status=$status")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                onLinkReady("mtu=$mtu")
+            }
+        }
+
+        override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            ctlReadPending = false
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == BUTTON_CONTROL_CHAR_UUID) {
+                val data = characteristic.value ?: return
+                handleControlBytes(data)
+            }
+        }
+
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            mainHandler.removeCallbacks(writeTimeoutWatchdog)
+            isWriting = false
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.w(TAG, "Write error status=$status on ${characteristic.uuid}")
+            }
+            processNextWrite()
+        }
+    }
+
+    private fun onLinkReady(reason: String) {
+        if (isLinkReady) return
+        isLinkReady = true
+        Log.i(TAG, "🚀 Pulsar Cluster Link READY ($reason)")
+
+        // Send initial general status packet immediately
+        dispatchGeneralPacket()
+
+        // Start 5-second general status heartbeat
+        mainHandler.removeCallbacks(heartbeatRunnable)
+        mainHandler.postDelayed(heartbeatRunnable, GEN_HEARTBEAT_PERIOD_MS)
+
+        // Start 700ms control characteristic reading
+        mainHandler.removeCallbacks(ctlPollRunnable)
+        mainHandler.postDelayed(ctlPollRunnable, CTL_POLL_MS)
+    }
+
+    // =========================================================================
+    // Control Handlebar Buttons Decoding
+    // =========================================================================
+
+    private fun handleControlBytes(b: ByteArray) {
+        if (b.size < 18) return
+        val prev = lastControlBytes
+        if (prev != null && prev.contentEquals(b)) return
+        lastControlBytes = b.clone()
+
+        val accept = b[1].toInt() and 0xFF
+        val reject = b[2].toInt() and 0xFF
+
+        if (!bootstrappedControls) {
+            bootstrappedControls = true
+            callAcceptCount = accept
+            callRejectCount = reject
+            return
+        }
+
+        if (accept != callAcceptCount) {
+            callAcceptCount = accept
+            Log.i(TAG, "Handlebar button: CALL ACCEPT pressed ($accept)")
+            CallManager.getInstance(context).acceptIncomingCall()
+        }
+        if (reject != callRejectCount) {
+            callRejectCount = reject
+            Log.i(TAG, "Handlebar button: CALL REJECT pressed ($reject)")
+            CallManager.getInstance(context).rejectIncomingCall()
+        }
+    }
+
+    // =========================================================================
+    // Turn-by-Turn Navigation & Dry-Run Simulation Streaming
+    // =========================================================================
+
+    /**
+     * Updates ongoing navigation with real Google Maps navigation data.
+     * Starts continuous 800 ms streaming to the bike cluster.
+     */
+    fun updateNavigationStep(step: ParsedNavigationStep) {
+        activeNavStep = step
+        isNavigationActive = true
+        _currentActiveManeuver.value = step.maneuver
+
+        mainHandler.removeCallbacks(tbtStreamRunnable)
+        mainHandler.post(tbtStreamRunnable)
     }
 
     /**
-     * Sends Turn-by-Turn navigation data to characteristic 0110 (48 bytes).
+     * Stops turn-by-turn navigation and dispatches the verified stop frame (type = 0)
+     * to clear the cluster display.
      */
-    fun sendNavigationStep(maneuver: Maneuver, distanceMeters: Int, streetName: String, etaMinutes: Int = 0) {
-        val packet = OtcPacketBuilder.buildTbtPacket(maneuver, distanceMeters, streetName, etaMinutes)
-        enqueueWrite(TBT_NAV_CHAR_UUID, packet)
+    fun stopNavigation() {
+        isNavigationActive = false
+        activeNavStep = null
+        _currentActiveManeuver.value = null
+        mainHandler.removeCallbacks(tbtStreamRunnable)
+
+        val stopFrame = OtcPacketBuilder.buildTbtStopFrame()
+        _lastSentPacket.value = stopFrame
+        _lastSentPacketHex.value = OtcPacketBuilder.toHex(stopFrame)
+        tbtCharacteristic?.let { char ->
+            if (isLinkReady) enqueueWrite(char, stopFrame)
+        }
     }
 
     /**
-     * Updates phone battery %, charging status, and cellular signal bars.
+     * Starts continuous Dry Run Turn Simulation at verified ~800 ms cadence.
+     * Keeps the arrow, distance, and road name glowing steadily on the motorcycle's LCD.
      */
-    fun updateTelemetry(batteryPercent: Int, isCharging: Boolean, signalBars: Int) {
+    fun startSimulation(maneuver: Maneuver, distanceMeters: Int, streetText: String) {
+        stopNavigation()
+        stopSimulation()
+
+        _isSimulationRunning.value = true
+        _currentActiveManeuver.value = maneuver
+
+        val cal = Calendar.getInstance()
+        var h = cal.get(Calendar.HOUR)
+        if (h == 0) h = 12
+
+        val simStep = ParsedNavigationStep(
+            maneuver = maneuver,
+            distanceMeters = distanceMeters,
+            totalDistanceMeters = distanceMeters + 1200,
+            streetName = streetText,
+            rawDistanceText = "${distanceMeters}m",
+            etaHour = h,
+            etaMinute = (cal.get(Calendar.MINUTE) + 6) % 60,
+            etaIsAm = (cal.get(Calendar.AM_PM) == Calendar.AM)
+        )
+        activeNavStep = simStep
+
+        Log.i(TAG, "▶️ Started Cluster Simulation for ${maneuver.description} ($distanceMeters m)")
+        mainHandler.removeCallbacks(tbtStreamRunnable)
+        mainHandler.post(tbtStreamRunnable)
+    }
+
+    /**
+     * Stops the dry-run simulation and sends the stop frame to return cluster to default LCD view.
+     */
+    fun stopSimulation() {
+        if (_isSimulationRunning.value) {
+            _isSimulationRunning.value = false
+            _currentActiveManeuver.value = null
+            activeNavStep = null
+            mainHandler.removeCallbacks(tbtStreamRunnable)
+
+            Log.i(TAG, "⏹️ Stopped Cluster Simulation -> Sending Stop Frame")
+            val stopFrame = OtcPacketBuilder.buildTbtStopFrame()
+            _lastSentPacket.value = stopFrame
+            _lastSentPacketHex.value = OtcPacketBuilder.toHex(stopFrame)
+            tbtCharacteristic?.let { char ->
+                if (isLinkReady) enqueueWrite(char, stopFrame)
+            }
+        }
+    }
+
+    // =========================================================================
+    // General Status Heartbeat, Calls & Alerts
+    // =========================================================================
+
+    fun updateTelemetry(
+        batteryPercent: Int,
+        isCharging: Boolean = false,
+        signalBars: Int = currentSignal,
+        volume: Int = currentVolume
+    ) {
         currentBattery = batteryPercent
-        currentCharging = isCharging
+        currentVolume = volume
         currentSignal = signalBars
         dispatchGeneralPacket()
     }
 
-    /**
-     * Updates call state (INCOMING_CALL, ACTIVE_CALL, NO_CALL) and caller ID.
-     */
     fun updateCallState(
         callState: CallState,
         callerName: String?,
-        callerNumber: String?,
+        callerNumber: String? = null,
         missedCallCount: Int = currentMissedCount
     ) {
         currentCallState = callState
         currentCallerName = callerName
-        currentCallerNumber = callerNumber
         currentMissedCount = missedCallCount
         dispatchGeneralPacket()
     }
 
-    /**
-     * Acknowledges call accept or reject action from handlebar button.
-     */
-    fun acknowledgeCallAction(accept: Boolean = false, reject: Boolean = false) {
-        dispatchGeneralPacket(acceptAck = accept, rejectAck = reject)
+    fun sendMissedCall(callerName: String, callerNumber: String, missedCount: Int = currentMissedCount) {
+        currentMissedCount = missedCount
+        val pkt = OtcPacketBuilder.buildMissedCallPacket(callerName, callerNumber)
+        _lastSentPacket.value = pkt
+        _lastSentPacketHex.value = OtcPacketBuilder.toHex(pkt)
+        missedCallCharacteristic?.let { target ->
+            if (isLinkReady) enqueueWrite(target, pkt)
+        }
+        dispatchGeneralPacket()
     }
 
-    private fun dispatchGeneralPacket(acceptAck: Boolean = false, rejectAck: Boolean = false) {
-        val packet = OtcPacketBuilder.buildGeneralPacketV2(
+    fun acknowledgeCallAction(accept: Boolean = false, reject: Boolean = false, rejectSms: Boolean = false) {
+        if (accept) callAcceptCount = (callAcceptCount + 1) and 0xFF
+        if (reject) callRejectCount = (callRejectCount + 1) and 0xFF
+        dispatchGeneralPacket()
+    }
+
+    private fun dispatchGeneralPacket() {
+        val pkt = OtcPacketBuilder.buildGeneralPacketV2(
             batteryPercent = currentBattery,
-            isCharging = currentCharging,
+            volumeLevel = currentVolume,
             signalBars = currentSignal,
             callState = currentCallState,
             callerName = currentCallerName,
-            callerNumber = currentCallerNumber,
-            callAcceptAck = acceptAck,
-            callRejectAck = rejectAck,
+            callAcceptAck = callAcceptCount,
+            callRejectAck = callRejectCount,
             missedCallCount = currentMissedCount
         )
-        enqueueWrite(GENERAL_CHAR_UUID, packet)
+        _lastSentPacket.value = pkt
+        _lastSentPacketHex.value = OtcPacketBuilder.toHex(pkt)
+        generalCharacteristic?.let { target ->
+            if (isLinkReady) enqueueWrite(target, pkt)
+        }
     }
 
-    /**
-     * Sends WhatsApp alert packet (44 bytes) to characteristic 0410.
-     */
-    fun sendWhatsAppAlert(senderName: String, count: Int = 1) {
-        val packet = OtcPacketBuilder.buildWhatsAppAlertPacket(senderName, count)
-        enqueueWrite(ALERTS_CHAR_UUID, packet)
+    fun sendWhatsAppAlert(senderName: String) {
+        val pkt = OtcPacketBuilder.buildWhatsAppAlertPacket(senderName)
+        _lastSentPacket.value = pkt
+        _lastSentPacketHex.value = OtcPacketBuilder.toHex(pkt)
+        alertsCharacteristic?.let { target ->
+            if (isLinkReady) enqueueWrite(target, pkt)
+        }
     }
 
-    /**
-     * Sends Missed Call packet (63 bytes) to characteristic 0310.
-     */
-    fun sendMissedCall(callerName: String, callerNumber: String, count: Int = 1) {
-        val packet = OtcPacketBuilder.buildMissedCallPacket(callerName, callerNumber, count)
-        enqueueWrite(MISSED_CALL_CHAR_UUID, packet)
-    }
+    // =========================================================================
+    // Serialized GATT Write Queue
+    // =========================================================================
 
-    private fun enqueueWrite(charUuid: UUID, packet: ByteArray) {
-        writeQueue.add(QueuedWrite(charUuid, packet))
+    private fun enqueueWrite(char: BluetoothGattCharacteristic, packet: ByteArray) {
+        if (!isLinkReady && char.uuid == TBT_NAV_CHAR_UUID) {
+            Log.w(TAG, "Write skipped: link not ready")
+            return
+        }
+
+        val writeType = if ((char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        }
+
+        // Cap queue to 12 items to prevent stale navigation latency
+        if (writeQueue.size > 12) {
+            writeQueue.poll()
+        }
+        writeQueue.add(QueuedWrite(char, packet, writeType))
         processNextWrite()
     }
 
@@ -328,140 +684,41 @@ class BajajBleManager private constructor(private val context: Context) {
         val gatt = bluetoothGatt ?: return
         val item = writeQueue.poll() ?: return
 
-        val targetChar = when (item.characteristicUuid) {
-            TBT_NAV_CHAR_UUID -> tbtCharacteristic
-            GENERAL_CHAR_UUID -> generalCharacteristic
-            MISSED_CALL_CHAR_UUID -> missedCallCharacteristic
-            ALERTS_CHAR_UUID -> alertsCharacteristic
-            else -> null
-        } ?: return
-
         isWriting = true
-        targetChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        targetChar.value = item.data
+        _lastSentPacket.value = item.data
+        _lastSentPacketHex.value = OtcPacketBuilder.toHex(item.data)
 
-        mainHandler.removeCallbacks(writeTimeoutRunnable)
-        mainHandler.postDelayed(writeTimeoutRunnable, 2000L)
+        mainHandler.removeCallbacks(writeTimeoutWatchdog)
+        val timeout = if (item.writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) 100L else 1200L
+        mainHandler.postDelayed(writeTimeoutWatchdog, timeout)
 
-        val success = gatt.writeCharacteristic(targetChar)
-        if (success) {
-            _lastSentPacket.value = item.data
-            Log.d(TAG, "Dispatched write to ${item.characteristicUuid} (${item.data.size} bytes)")
-        } else {
-            Log.w(TAG, "Write initiation failed for ${item.characteristicUuid}")
-            mainHandler.removeCallbacks(writeTimeoutRunnable)
-            isWriting = false
-            processNextWrite()
-        }
-    }
+        try {
+            val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val res = gatt.writeCharacteristic(item.characteristic, item.data, item.writeType)
+                res == BluetoothStatusCodes.SUCCESS
+            } else {
+                item.characteristic.writeType = item.writeType
+                @Suppress("DEPRECATION")
+                item.characteristic.value = item.data
+                @Suppress("DEPRECATION")
+                gatt.writeCharacteristic(item.characteristic)
+            }
 
-    private val gattCallback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            val device = gatt.device
-            val name = device.name ?: "Bajaj Pulsar NS200"
-
-            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
-                Log.i(TAG, "Connected to $name, discovering services...")
-                _connectionState.value = BleConnectionState.Connected(name, device.address)
-                com.pulsarnav.app.data.AppSettings.getInstance(context).lastConnectedBikeMac = device.address
-                mainHandler.postDelayed({ gatt.discoverServices() }, 500)
-
-                // Start ride tracking session
-                com.pulsarnav.app.tracking.RideTracker.getInstance(context).onBikeConnected()
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.w(TAG, "Disconnected from $name (status=$status)")
-                clearCharacteristics()
-                _connectionState.value = BleConnectionState.Disconnected
-
-                // Finalize ride session & update odometer
-                val trip = com.pulsarnav.app.tracking.RideTracker.getInstance(context).onBikeDisconnected()
-                if (trip != null) {
-                    com.pulsarnav.app.maintenance.MaintenanceManager.getInstance(context).addDistance(trip.distanceKm)
-                }
-
-                // Record automatic parking GPS location
-                com.pulsarnav.app.location.ParkingManager.getInstance(context).onBikeDisconnected()
-
-                // Automatic Background Reconnect (only if disconnect was not manually triggered by user)
-                val savedAddress = prefs.getString(PREF_LAST_BIKE_ADDR, null)
-                if (!userRequestedDisconnect && savedAddress != null) {
+            if (!ok) {
+                isWriting = false
+                if (item.attempts < 2) {
+                    item.attempts++
                     mainHandler.postDelayed({
-                        try {
-                            if (!userRequestedDisconnect && _connectionState.value is BleConnectionState.Disconnected) {
-                                bluetoothAdapter?.getRemoteDevice(savedAddress)?.let { connect(it) }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Auto-reconnect attempt failed: ${e.message}")
-                        }
-                    }, 4000)
-                }
-            }
-        }
-
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val service = gatt.getService(OTC_SERVICE_UUID)
-                if (service != null) {
-                    tbtCharacteristic = service.getCharacteristic(TBT_NAV_CHAR_UUID)
-                    generalCharacteristic = service.getCharacteristic(GENERAL_CHAR_UUID)
-                    missedCallCharacteristic = service.getCharacteristic(MISSED_CALL_CHAR_UUID)
-                    alertsCharacteristic = service.getCharacteristic(ALERTS_CHAR_UUID)
-                    buttonCharacteristic = service.getCharacteristic(BUTTON_CONTROL_CHAR_UUID)
-
-                    Log.i(TAG, "Discovered OTC Console Services & Characteristics successfully")
-
-                    // Enable Handlebar Button Notifications (0a10)
-                    buttonCharacteristic?.let { char ->
-                        gatt.setCharacteristicNotification(char, true)
-                        char.getDescriptor(CCCD_DESCRIPTOR_UUID)?.let { desc ->
-                            desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                            gatt.writeDescriptor(desc)
-                            Log.i(TAG, "Handlebar button notification CCCD registered")
-                        }
-                    }
-
-                    // Push initial general telemetry (battery & signal)
-                    dispatchGeneralPacket()
+                        writeQueue.add(item)
+                        processNextWrite()
+                    }, 100L)
                 } else {
-                    Log.w(TAG, "OTC Service UUID not found on device!")
+                    processNextWrite()
                 }
             }
-        }
-
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            if (characteristic.uuid == BUTTON_CONTROL_CHAR_UUID) {
-                val data = characteristic.value ?: return
-                Log.d(TAG, "Handlebar button data received: ${data.joinToString(" ") { "%02X".format(it) }}")
-
-                // Byte 4 = Accept, Byte 5 = Reject
-                if (data.size > 5) {
-                    val acceptByte = data[4].toInt() and 0xFF
-                    val rejectByte = data[5].toInt() and 0xFF
-
-                    if (acceptByte == 1) {
-                        CallManager.getInstance(context).acceptIncomingCall()
-                        return
-                    } else if (rejectByte == 1) {
-                        CallManager.getInstance(context).rejectIncomingCall()
-                        return
-                    }
-                }
-
-                // General Button Down / Up Timing detection for Single Click vs Long Press
-                val isPressed = data.isNotEmpty() && (data[0].toInt() and 0x01 != 0)
-                if (isPressed != isButtonCurrentlyPressed) {
-                    isButtonCurrentlyPressed = isPressed
-                    CallManager.getInstance(context).onHandlebarButtonStateChanged(isPressed)
-                }
-            }
-        }
-
-        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            mainHandler.removeCallbacks(writeTimeoutRunnable)
+        } catch (e: Exception) {
+            Log.w(TAG, "Exception during GATT write: ${e.message}")
             isWriting = false
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                Log.w(TAG, "Characteristic write error status=$status on ${characteristic.uuid}")
-            }
             processNextWrite()
         }
     }
