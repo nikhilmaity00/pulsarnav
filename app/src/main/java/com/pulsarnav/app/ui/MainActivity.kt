@@ -23,7 +23,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
-import android.widget.Toast
+import com.google.android.material.snackbar.Snackbar
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
         if (btGranted) {
             bleManager.startScan()
         } else {
-            Toast.makeText(this, "Bluetooth permissions are required to connect to your bike", Toast.LENGTH_SHORT).show()
+            showFeedback("Bluetooth permissions are required to connect to your bike", isAlert = true)
         }
     }
 
@@ -288,17 +288,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClusterRecalibrate() {
+        binding.btnTopSos.setOnClickListener {
+            provideHapticFeedback()
+            showEmergencyQuickActionsSheet()
+        }
         binding.btnRecalibrateCluster.setOnClickListener {
             provideHapticFeedback()
-            showClusterRecalibrateDialog()
-        }
-        binding.btnQuickEditDte.setOnClickListener {
-            provideHapticFeedback()
-            showQuickDteEditDialog()
+            showClusterRecalibrateBottomSheet()
         }
         binding.layoutProjectedRange.setOnClickListener {
             provideHapticFeedback()
-            showQuickDteEditDialog()
+            showClusterRecalibrateBottomSheet()
         }
     }
 
@@ -336,7 +336,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvFuelLevelText.text = "0% Tank Level • 0.0L / 12.0L"
             binding.progressFuelLevel.progress = 0
         } else {
-            binding.tvProjectedRange.text = dteKm.toString()
+            binding.tvProjectedRange.text = if (dteKm > 0) dteKm.toString() else "--"
             binding.tvDteSubtext.text = "~${"%.1f".format(fuelLiters)}L in tank"
             binding.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${"%.1f".format(fuelLiters)}L / 12.0L"
             binding.progressFuelLevel.progress = fuelPercent
@@ -381,156 +381,109 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showQuickDteEditDialog() {
-        val input = EditText(this).apply {
-            setText(appSettings.projectedDteKm.toString())
-            setSelectAllOnFocus(true)
-            hint = "Distance to Empty (km)"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
-            setBackgroundResource(R.drawable.bg_obsidian_input)
-            setPadding(40, 30, 40, 30)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        val container = FrameLayout(this).apply {
-            setPadding(50, 30, 50, 10)
-            addView(input)
-        }
+    private fun showClusterRecalibrateBottomSheet() {
+        val dialog = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
+        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_recalibrate_cluster, null)
+        dialog.setContentView(sheetView)
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle("✏️ Edit Distance to Empty (DTE)")
-            .setMessage("Enter the DTE reading currently displayed on your NS200 cluster:")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val dte = input.text.toString().toIntOrNull()
-                if (dte != null && dte >= 0) {
-                    provideHapticFeedback()
-                    appSettings.projectedDteKm = dte
-                    recordSyncTime()
-                    updateHeroRangeDisplay()
-                    Toast.makeText(this, "DTE updated to $dte km", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
+        val etDte = sheetView.findViewById<EditText>(R.id.etRecalibrateDte)
+        val etOdo = sheetView.findViewById<EditText>(R.id.etRecalibrateOdo)
+        val etFuel = sheetView.findViewById<EditText>(R.id.etRecalibrateFuelLiters)
+        val chipReserve = sheetView.findViewById<MaterialButton>(R.id.chipPresetReserve)
+        val chipQuarter = sheetView.findViewById<MaterialButton>(R.id.chipPresetQuarter)
+        val chipHalf = sheetView.findViewById<MaterialButton>(R.id.chipPresetHalf)
+        val chipFull = sheetView.findViewById<MaterialButton>(R.id.chipPresetFull)
+        val btnSave = sheetView.findViewById<MaterialButton>(R.id.btnSaveRecalibration)
 
-    private fun showClusterRecalibrateDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 10)
-        }
-
-        val tvInfo = TextView(this).apply {
-            text = "Check your NS200 digital LCD cluster and enter the readings to recalibrate:"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-            textSize = 12f
-            setPadding(0, 0, 0, 16)
-        }
-        layout.addView(tvInfo)
-
-        // 1. DTE Input
-        val tvDteLabel = TextView(this).apply {
-            text = "1. Cluster DTE (km):"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-        layout.addView(tvDteLabel)
-
-        val etDte = EditText(this).apply {
-            setText(appSettings.projectedDteKm.toString())
-            hint = "e.g. 340"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
-            setBackgroundResource(R.drawable.bg_obsidian_input)
-            setPadding(30, 24, 30, 24)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        layout.addView(etDte)
-
-        // 2. Odometer Input
         val currentOdo = maintenanceManager.status.value.totalOdometerKm
-        val tvOdoLabel = TextView(this).apply {
-            text = "\n2. Cluster Total Odometer (km):"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        val currentDte = appSettings.projectedDteKm
+        if (currentDte > 0) {
+            etDte?.setText(currentDte.toString())
+        } else {
+            etDte?.setText("")
         }
-        layout.addView(tvOdoLabel)
+        etOdo?.setText(String.format(Locale.US, "%.1f", currentOdo))
+        etFuel?.setText(String.format(Locale.US, "%.1f", appSettings.fuelLevelLiters))
 
-        val etOdo = EditText(this).apply {
-            setText("%.1f".format(currentOdo))
-            hint = "e.g. 14250.0"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
-            setBackgroundResource(R.drawable.bg_obsidian_input)
-            setPadding(30, 24, 30, 24)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-        }
-        layout.addView(etOdo)
+        btnSave?.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
+        btnSave?.setTextColor(currentTheme.onPrimaryColor)
 
-        // 3. Fuel Bars on Console
-        val tvFuelLabel = TextView(this).apply {
-            text = "\n3. Fuel Gauge Bars on Console:"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-        layout.addView(tvFuelLabel)
-
-        val fuelLevels = arrayOf(
-            "6 Bars • Full Tank (100% • 12.0L)",
-            "5 Bars • High (85% • 10.2L)",
-            "4 Bars • Half+ (66% • 8.0L)",
-            "3 Bars • Half Tank (50% • 6.0L)",
-            "2 Bars • Low (33% • 4.0L)",
-            "1 Bar / Blinking • Reserve (16% • 2.0L)"
-        )
-        val spinnerFuel = android.widget.Spinner(this).apply {
-            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, fuelLevels)
-            setSelection(1) // 5 Bars default
-            setPadding(10, 20, 10, 20)
-        }
-        layout.addView(spinnerFuel)
-
-        val scrollView: View = ScrollView(this).apply {
-            addView(layout)
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("🔄 Recalibrate with Cluster")
-            .setView(scrollView)
-            .setPositiveButton("Sync & Save") { _, _ ->
-                provideHapticFeedback()
-                val enteredDte = etDte.text.toString().toIntOrNull() ?: appSettings.projectedDteKm
-                val enteredOdo = etOdo.text.toString().toDoubleOrNull() ?: currentOdo
-
-                val (percent, liters) = when (spinnerFuel.selectedItemPosition) {
-                    0 -> 100 to 12.0f
-                    1 -> 85 to 10.2f
-                    2 -> 66 to 8.0f
-                    3 -> 50 to 6.0f
-                    4 -> 33 to 4.0f
-                    else -> 16 to 2.0f
+        val updatePresetChips = { selectedLiters: Float ->
+            val presets = listOf(
+                chipReserve to 2.4f,
+                chipQuarter to 3.0f,
+                chipHalf to 6.0f,
+                chipFull to 12.0f
+            )
+            for ((chip, lit) in presets) {
+                if (chip != null) {
+                    val isSelected = Math.abs(selectedLiters - lit) < 0.15f
+                    if (isSelected) {
+                        chip.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+                        chip.strokeColor = ColorStateList.valueOf(currentTheme.accentColor)
+                        chip.setTextColor(currentTheme.accentColor)
+                    } else {
+                        chip.backgroundTintList = ContextCompat.getColorStateList(this, R.color.surface_card)
+                        chip.strokeColor = ContextCompat.getColorStateList(this, R.color.surface_border)
+                        chip.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+                    }
                 }
-
-                appSettings.projectedDteKm = enteredDte
-                appSettings.fuelLevelPercent = percent
-                appSettings.fuelLevelLiters = liters
-                maintenanceManager.setOdometer(enteredOdo)
-                recordSyncTime()
-
-                updateHeroRangeDisplay()
-
-                Toast.makeText(
-                    this,
-                    "Cluster synced: $enteredDte km DTE • ${"%.1f".format(enteredOdo)} km ODO",
-                    Toast.LENGTH_SHORT
-                ).show()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+
+        updatePresetChips(appSettings.fuelLevelLiters)
+
+        val autoFillDteIfEmpty = { suggestedDte: Int ->
+            val current = etDte?.text?.toString()?.trim().orEmpty()
+            if (current.isEmpty() || current == "0") {
+                etDte?.setText(suggestedDte.toString())
+            }
+        }
+
+        chipReserve?.setOnClickListener {
+            provideHapticFeedback()
+            etFuel?.setText("2.4")
+            autoFillDteIfEmpty(80)
+            updatePresetChips(2.4f)
+        }
+        chipQuarter?.setOnClickListener {
+            provideHapticFeedback()
+            etFuel?.setText("3.0")
+            autoFillDteIfEmpty(105)
+            updatePresetChips(3.0f)
+        }
+        chipHalf?.setOnClickListener {
+            provideHapticFeedback()
+            etFuel?.setText("6.0")
+            autoFillDteIfEmpty(210)
+            updatePresetChips(6.0f)
+        }
+        chipFull?.setOnClickListener {
+            provideHapticFeedback()
+            etFuel?.setText("12.0")
+            autoFillDteIfEmpty(420)
+            updatePresetChips(12.0f)
+        }
+
+        btnSave?.setOnClickListener {
+            provideHapticFeedback()
+            val enteredDte = etDte?.text?.toString()?.toIntOrNull() ?: appSettings.projectedDteKm
+            val enteredOdo = etOdo?.text?.toString()?.toDoubleOrNull() ?: currentOdo
+            val enteredLiters = (etFuel?.text?.toString()?.toFloatOrNull() ?: appSettings.fuelLevelLiters).coerceIn(0.0f, 12.0f)
+            val percent = ((enteredLiters / 12.0f) * 100).toInt().coerceIn(0, 100)
+
+            appSettings.projectedDteKm = enteredDte
+            appSettings.fuelLevelPercent = percent
+            appSettings.fuelLevelLiters = enteredLiters
+            maintenanceManager.setOdometer(enteredOdo)
+            recordSyncTime()
+            updateHeroRangeDisplay()
+
+            dialog.dismiss()
+            showFeedback("Cluster synced: ${enteredDte} km DTE • ${String.format(Locale.US, "%.1f", enteredOdo)} km ODO")
+        }
+
+        dialog.show()
     }
 
     private fun setupStatsNavigation() {
@@ -610,7 +563,7 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             val loc = parkingManager.lastParkedLocation.value
             if (loc == null) {
-                Toast.makeText(this, "Parking spot not saved yet. Turn off bike ignition to save.", Toast.LENGTH_SHORT).show()
+                showFeedback("Parking spot not saved yet. Turn off bike ignition to save.")
                 return@setOnClickListener
             }
 
@@ -622,7 +575,7 @@ class MainActivity : AppCompatActivity() {
                     val fallback = parkingManager.getFallbackWalkingDirectionsIntent()
                     startActivity(fallback)
                 } catch (e2: Exception) {
-                    Toast.makeText(this, "Could not open Maps navigation", Toast.LENGTH_SHORT).show()
+                    showFeedback("Could not open Maps navigation", isAlert = true)
                 }
             }
         }
@@ -632,33 +585,33 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_LEFT) {
                 bleManager.stopSimulation()
-                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+                showFeedback("Turn simulation stopped")
             } else {
                 bleManager.startSimulation(Maneuver.TURN_LEFT, 250, "Left onto MG Road")
                 updateNavDisplay(Maneuver.TURN_LEFT, "250 m", "Left onto MG Road", "14 min ETA")
-                Toast.makeText(this, "Simulating Left Turn on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+                showFeedback("Simulating Left Turn on Cluster (~800ms stream)")
             }
         }
         binding.btnTestStraight.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.STRAIGHT) {
                 bleManager.stopSimulation()
-                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+                showFeedback("Turn simulation stopped")
             } else {
                 bleManager.startSimulation(Maneuver.STRAIGHT, 750, "Western Express Highway")
                 updateNavDisplay(Maneuver.STRAIGHT, "750 m", "Western Express Highway", "11 min ETA")
-                Toast.makeText(this, "Simulating Straight on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+                showFeedback("Simulating Straight on Cluster (~800ms stream)")
             }
         }
         binding.btnTestRight.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_RIGHT) {
                 bleManager.stopSimulation()
-                Toast.makeText(this, "Turn simulation stopped", Toast.LENGTH_SHORT).show()
+                showFeedback("Turn simulation stopped")
             } else {
                 bleManager.startSimulation(Maneuver.TURN_RIGHT, 150, "Right onto Link Road")
                 updateNavDisplay(Maneuver.TURN_RIGHT, "150 m", "Right onto Link Road", "8 min ETA")
-                Toast.makeText(this, "Simulating Right Turn on Cluster (~800ms stream)", Toast.LENGTH_SHORT).show()
+                showFeedback("Simulating Right Turn on Cluster (~800ms stream)")
             }
         }
         binding.btnStopSimulation.setOnClickListener {
@@ -669,14 +622,14 @@ class MainActivity : AppCompatActivity() {
             binding.tvStreetName.text = "Navigation stopped"
             binding.tvManeuverIcon.text = "⏹"
             binding.tvEtaBadge.text = "Idle"
-            Toast.makeText(this, "Simulation Stopped & Cluster Cleared", Toast.LENGTH_SHORT).show()
+            showFeedback("Simulation Stopped & Cluster Cleared")
         }
 
         // Call & WhatsApp simulation
         binding.btnSimulateCall.setOnClickListener {
             provideHapticFeedback()
             callManager.simulateIncomingCall("Dad", "+91 98765 43210")
-            Toast.makeText(this, "Simulating Incoming Call to Cluster", Toast.LENGTH_SHORT).show()
+            showFeedback("Simulating Incoming Call to Cluster")
         }
 
         binding.btnSimulateWhatsApp.setOnClickListener {
@@ -685,20 +638,20 @@ class MainActivity : AppCompatActivity() {
             bleManager.sendWhatsAppAlert(sampleSender)
             binding.tvWhatsAppAlertBanner.text = "💬 WhatsApp Alert: $sampleSender (Showing 6s)"
             binding.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
-            Toast.makeText(this, "WhatsApp alert sent to cluster (6s preview)", Toast.LENGTH_SHORT).show()
+            showFeedback("WhatsApp alert sent to cluster (6s preview)")
         }
 
         binding.btnSimulateMissedCall.setOnClickListener {
             provideHapticFeedback()
             callManager.simulateEndCall()
-            Toast.makeText(this, "Call Ended / Idle", Toast.LENGTH_SHORT).show()
+            showFeedback("Call Ended / Idle")
         }
 
         // Parking Simulation
         binding.btnSimulatePark.setOnClickListener {
             provideHapticFeedback()
             parkingManager.saveLocation(19.0596, 72.8295, "Bandra Bandstand, Mumbai")
-            Toast.makeText(this, "Simulated parking location saved!", Toast.LENGTH_SHORT).show()
+            showFeedback("Simulated parking location saved!")
         }
 
         // Simulate Ride
@@ -706,7 +659,7 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             rideTracker.simulateTrip(14.2, 1695, 84.0, 36.2, "Bandra to BKC Ride")
             maintenanceManager.addDistance(14.2)
-            Toast.makeText(this, "Simulated 14.2 km ride logged!", Toast.LENGTH_SHORT).show()
+            showFeedback("Simulated 14.2 km ride logged!")
         }
 
         // Edit Odometer
@@ -720,7 +673,7 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             maintenanceManager.markChainLubed()
             recordSyncTime()
-            Toast.makeText(this, "Chain marked cleaned & lubed (500 km reset)", Toast.LENGTH_SHORT).show()
+            showFeedback("Chain marked cleaned & lubed (500 km reset)")
         }
 
         // Mark Serviced
@@ -728,7 +681,7 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             maintenanceManager.markServiceDone()
             recordSyncTime()
-            Toast.makeText(this, "Service interval reset to 5,000 km", Toast.LENGTH_SHORT).show()
+            showFeedback("Service interval reset to 5,000 km")
         }
 
         // Add Refuel Entry
@@ -775,7 +728,7 @@ class MainActivity : AppCompatActivity() {
                 val travelMode = if (appSettings.isTwoWheelerMode) "two_wheeler" else "driving"
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com?travelmode=$travelMode")))
             } catch (e2: Exception) {
-                Toast.makeText(this, "Could not open Google Maps", Toast.LENGTH_SHORT).show()
+                showFeedback("Could not open Google Maps", isAlert = true)
             }
         }
     }
@@ -793,7 +746,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=petrol+pump")))
             } catch (e2: Exception) {
-                Toast.makeText(this, "Could not locate nearby petrol pumps", Toast.LENGTH_SHORT).show()
+                showFeedback("Could not locate nearby petrol pumps", isAlert = true)
             }
         }
     }
@@ -958,7 +911,7 @@ class MainActivity : AppCompatActivity() {
                 updateBikeInfoDisplay()
                 updateDocumentsSummary()
                 recordSyncTime()
-                Toast.makeText(this, "Motorcycle details updated!", Toast.LENGTH_SHORT).show()
+                showFeedback("Motorcycle details updated!")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1029,7 +982,7 @@ class MainActivity : AppCompatActivity() {
 
                 updateBikeInfoDisplay()
                 recordSyncTime()
-                Toast.makeText(this, "Profile updated!", Toast.LENGTH_SHORT).show()
+                showFeedback("Profile updated!")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1151,7 +1104,7 @@ class MainActivity : AppCompatActivity() {
                     maintenanceManager.deleteServiceRecord(rec.id)
                     recordSyncTime()
                     updateServiceHistorySummary()
-                    Toast.makeText(this@MainActivity, "Record deleted", Toast.LENGTH_SHORT).show()
+                    showFeedback("Record deleted")
                     showServiceHistoryDialog() // refresh dialog
                 }
             }
@@ -1337,7 +1290,7 @@ class MainActivity : AppCompatActivity() {
 
                 recordSyncTime()
                 updateServiceHistorySummary()
-                Toast.makeText(this, "Service record saved!", Toast.LENGTH_SHORT).show()
+                showFeedback("Service record saved!")
                 showServiceHistoryDialog()
             }
             .setNegativeButton("Cancel", null)
@@ -1395,7 +1348,7 @@ class MainActivity : AppCompatActivity() {
                         try {
                             documentPicker.launch(arrayOf("image/*", "application/pdf"))
                         } catch (e: Exception) {
-                            Toast.makeText(this, "Could not open file picker: ${e.message}", Toast.LENGTH_SHORT).show()
+                            showFeedback("Could not open file picker: ${e.message}", isAlert = true)
                         }
                     }
                     2 -> {
@@ -1483,7 +1436,7 @@ class MainActivity : AppCompatActivity() {
                 updateDocumentsSummary()
                 updateBikeInfoDisplay()
                 recordSyncTime()
-                Toast.makeText(this, "$title updated!", Toast.LENGTH_SHORT).show()
+                showFeedback("$title updated!")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1526,16 +1479,16 @@ class MainActivity : AppCompatActivity() {
             recordSyncTime()
             updateDocumentsSummary()
             provideHapticFeedback()
-            Toast.makeText(this, "Document uploaded successfully!", Toast.LENGTH_SHORT).show()
+            showFeedback("Document uploaded successfully!")
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to upload document: ${e.message}", Toast.LENGTH_SHORT).show()
+            showFeedback("Failed to upload document: ${e.message}", isAlert = true)
         }
     }
 
     private fun viewDocument(path: String, title: String) {
         val file = File(path)
         if (!file.exists()) {
-            Toast.makeText(this, "Document file not found on device", Toast.LENGTH_SHORT).show()
+            showFeedback("Document file not found on device", isAlert = true)
             return
         }
 
@@ -1558,7 +1511,7 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "Could not open document viewer: ${e.message}", Toast.LENGTH_SHORT).show()
+            showFeedback("Could not open document viewer: ${e.message}", isAlert = true)
         }
     }
 
@@ -1581,7 +1534,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     startActivity(intent)
                 } catch (_: Exception) {
-                    Toast.makeText(this, "Could not open dialer for $phone", Toast.LENGTH_SHORT).show()
+                    showFeedback("Could not open dialer for $phone", isAlert = true)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -1643,7 +1596,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
         binding.switchTwoWheeler.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTwoWheelerMode = isChecked
-            Toast.makeText(this, "Two-Wheeler Mode (🛵): ${if (isChecked) "ON" else "OFF (Car)"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowTwoWheeler.setOnClickListener {
             provideHapticFeedback()
@@ -1654,7 +1606,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
         binding.switchAutoPark.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isAutoParkEnabled = isChecked
-            Toast.makeText(this, "Auto-Save Parking: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowAutoPark.setOnClickListener {
             provideHapticFeedback()
@@ -1665,7 +1616,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
         binding.switchRideTracking.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isRideTrackingEnabled = isChecked
-            Toast.makeText(this, "Ride Tracking: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowRideTracking.setOnClickListener {
             provideHapticFeedback()
@@ -1676,7 +1626,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
         binding.switchMediaControl.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isMediaControlEnabled = isChecked
-            Toast.makeText(this, "Media Control: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowMediaControl.setOnClickListener {
             provideHapticFeedback()
@@ -1687,7 +1636,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
         binding.switchWhatsAppAlerts.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isWhatsAppAlertsEnabled = isChecked
-            Toast.makeText(this, "WhatsApp Alerts: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowWhatsAppAlerts.setOnClickListener {
             provideHapticFeedback()
@@ -1698,7 +1646,6 @@ class MainActivity : AppCompatActivity() {
         binding.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
         binding.switchTelemetry.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTelemetrySyncEnabled = isChecked
-            Toast.makeText(this, "Cluster Telemetry: ${if (isChecked) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
         binding.rowTelemetry.setOnClickListener {
             provideHapticFeedback()
@@ -1787,32 +1734,32 @@ class MainActivity : AppCompatActivity() {
         binding.cardThemeWineRed.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_WINE_RED)
-            Toast.makeText(this, "🍷 Wine Red Theme Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("🍷 Wine Red theme active")
         }
         binding.cardThemeAmoled.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_AMOLED)
-            Toast.makeText(this, "🖤 AMOLED Pure Black Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("🖤 AMOLED Pure Black active")
         }
         binding.cardThemeStealth.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_STEALTH)
-            Toast.makeText(this, "⬛ Stealth Mono Theme Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("⬛ Stealth Mono theme active")
         }
         binding.cardThemeAmber.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_AMBER)
-            Toast.makeText(this, "⚡ Neon Amber Theme Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("⚡ Neon Amber theme active")
         }
         binding.cardThemeMint.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_MINT)
-            Toast.makeText(this, "🟢 Hyper Mint Theme Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("🟢 Hyper Mint theme active")
         }
         binding.cardThemeBlue.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_BLUE)
-            Toast.makeText(this, "🔵 Liquid Blue Theme Applied", Toast.LENGTH_SHORT).show()
+            showFeedback("🔵 Liquid Blue theme active")
         }
     }
 
@@ -1891,12 +1838,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 5. Cockpit Elements
-        binding.tvTopBarBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvTopBarBadge.setTextColor(theme.accentColor)
+        binding.btnTopSos.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
+        binding.btnTopSos.strokeColor = ColorStateList.valueOf(theme.borderColor)
+        binding.btnTopSos.setTextColor(theme.accentColor)
 
         binding.tvProjectedRange.setTextColor(theme.accentColor)
         binding.tvDteSubtext.setTextColor(theme.accentColor)
-        binding.btnQuickEditDte.setTextColor(theme.accentColor)
         binding.btnRecalibrateCluster.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
         binding.btnRecalibrateCluster.strokeColor = ColorStateList.valueOf(theme.borderColor)
         binding.btnRecalibrateCluster.setTextColor(theme.accentColor)
@@ -1935,8 +1882,10 @@ class MainActivity : AppCompatActivity() {
         binding.layoutLifetimeStatsHeader.setBackgroundColor(theme.subtleColor)
         binding.tvYouTravelledTitle.setTextColor(theme.accentColor)
         binding.tvLifetimeFuelHome.setTextColor(theme.accentColor)
-        binding.btnViewPreviousRides.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
-        binding.btnViewAllRidingStats.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
+        binding.btnViewPreviousRides.strokeColor = theme.cardBorderColor
+        binding.btnViewAllRidingStats.strokeColor = theme.cardBorderColor
+        binding.tvViewPreviousRidesArrow.setTextColor(theme.accentColor)
+        binding.tvViewAllRidingStatsArrow.setTextColor(theme.accentColor)
 
         // Primary Buttons (Open Google Maps & Scan)
         binding.btnOpenMaps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
@@ -2152,6 +2101,128 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    private fun showFeedback(
+        message: String,
+        actionText: String? = null,
+        isAlert: Boolean = false,
+        onAction: (() -> Unit)? = null
+    ) {
+        try {
+            val snackbar = Snackbar.make(
+                binding.root,
+                message,
+                if (actionText != null) Snackbar.LENGTH_LONG else Snackbar.LENGTH_SHORT
+            )
+            snackbar.anchorView = binding.bottomNav
+            snackbar.setBackgroundTint(
+                if (isAlert) ContextCompat.getColor(this, R.color.wine_red_subtle)
+                else ContextCompat.getColor(this, R.color.surface_elevated)
+            )
+            snackbar.setTextColor(
+                if (isAlert) ContextCompat.getColor(this, R.color.wine_red_light)
+                else ContextCompat.getColor(this, R.color.text_primary)
+            )
+            if (actionText != null && onAction != null) {
+                snackbar.setActionTextColor(currentTheme.accentColor)
+                snackbar.setAction(actionText) {
+                    provideHapticFeedback()
+                    onAction()
+                }
+            }
+            snackbar.show()
+        } catch (_: Exception) {}
+    }
+
+    private fun dialEmergencyNumber(number: String) {
+        val cleanNumber = number.filter { it.isDigit() || it == '+' }
+        try {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanNumber"))
+            startActivity(intent)
+        } catch (e: Exception) {
+            showFeedback("Could not open dialer for $cleanNumber", isAlert = true)
+        }
+    }
+
+    private fun showEmergencyQuickActionsSheet() {
+        val dialog = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
+        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_emergency, null)
+        dialog.setContentView(sheetView)
+
+        val cardSos108 = sheetView.findViewById<MaterialCardView>(R.id.cardSos108)
+        val cardSos112 = sheetView.findViewById<MaterialCardView>(R.id.cardSos112)
+        val cardSosIce = sheetView.findViewById<MaterialCardView>(R.id.cardSosIce)
+        val cardFindHospitals = sheetView.findViewById<MaterialCardView>(R.id.cardFindHospitals)
+        val cardMedicalProfile = sheetView.findViewById<MaterialCardView>(R.id.cardMedicalProfile)
+        val tvSheetIceSubtitle = sheetView.findViewById<TextView>(R.id.tvSheetIceSubtitle)
+        val tvSheetBloodGroup = sheetView.findViewById<TextView>(R.id.tvSheetBloodGroup)
+        val tvSheetMedicalNotes = sheetView.findViewById<TextView>(R.id.tvSheetMedicalNotes)
+        val btnEditMedicalProfile = sheetView.findViewById<TextView>(R.id.btnEditMedicalProfile)
+
+        cardSos108?.strokeColor = currentTheme.cardBorderColor
+        cardSos112?.strokeColor = currentTheme.cardBorderColor
+        cardSosIce?.strokeColor = currentTheme.cardBorderColor
+        cardFindHospitals?.strokeColor = currentTheme.cardBorderColor
+        cardMedicalProfile?.strokeColor = currentTheme.cardBorderColor
+
+        val icePhone = appSettings.emergencyContactPhone
+        val iceName = appSettings.emergencyContactName
+        if (icePhone.isNotBlank() && icePhone != "112") {
+            tvSheetIceSubtitle?.text = "$iceName • $icePhone"
+        } else {
+            tvSheetIceSubtitle?.text = "Tap to configure ICE emergency contact"
+        }
+
+        val blood = if (appSettings.riderBloodGroup.isNotBlank() && appSettings.riderBloodGroup != "Not Specified") "🩸 ${appSettings.riderBloodGroup}" else "🩸 Blood Group --"
+        tvSheetBloodGroup?.text = blood
+        tvSheetBloodGroup?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+        tvSheetBloodGroup?.setTextColor(currentTheme.accentColor)
+
+        btnEditMedicalProfile?.setTextColor(currentTheme.accentColor)
+
+        val med = appSettings.medicalNotes
+        tvSheetMedicalNotes?.text = if (med.isNotBlank() && med != "No known allergies") med else "No allergies or medical notes recorded. Tap Edit to update."
+
+        cardSos108?.setOnClickListener {
+            provideHapticFeedback()
+            dialEmergencyNumber("108")
+        }
+
+        cardSos112?.setOnClickListener {
+            provideHapticFeedback()
+            dialEmergencyNumber("112")
+        }
+
+        cardSosIce?.setOnClickListener {
+            provideHapticFeedback()
+            if (icePhone.isNotBlank() && icePhone != "112") {
+                dialEmergencyNumber(icePhone)
+            } else {
+                dialog.dismiss()
+                showFeedback("Please configure your ICE contact details")
+                showEmergencyMedicalDialog()
+            }
+        }
+
+        cardFindHospitals?.setOnClickListener {
+            provideHapticFeedback()
+            launchEmergencyHospitals()
+        }
+
+        btnEditMedicalProfile?.setOnClickListener {
+            provideHapticFeedback()
+            dialog.dismiss()
+            showEmergencyMedicalDialog()
+        }
+
+        cardMedicalProfile?.setOnClickListener {
+            provideHapticFeedback()
+            dialog.dismiss()
+            showEmergencyMedicalDialog()
+        }
+
+        dialog.show()
+    }
+
     private fun launchNavigationTo(destination: String) {
         BikeBleForegroundService.start(this)
         val mode = if (appSettings.isTwoWheelerMode) "l" else "d"
@@ -2167,7 +2238,7 @@ class MainActivity : AppCompatActivity() {
                 val webUri = Uri.parse("https://www.google.com/maps/dir/?api=1&destination=${Uri.encode(destination)}&travelmode=$travelMode")
                 startActivity(Intent(Intent.ACTION_VIEW, webUri))
             } catch (e2: Exception) {
-                Toast.makeText(this, "Could not open Google Maps navigation", Toast.LENGTH_SHORT).show()
+                showFeedback("Could not open Google Maps navigation", isAlert = true)
             }
         }
     }
@@ -2207,7 +2278,7 @@ class MainActivity : AppCompatActivity() {
             val defaultVal = if (isHome) "Home" else "Work"
             if (isHome) appSettings.homeAddress = defaultVal else appSettings.workAddress = defaultVal
             updateQuickNavButtons()
-            Toast.makeText(this, "Linked to Google Maps $label", Toast.LENGTH_SHORT).show()
+            showFeedback("Linked to Google Maps $label")
             sheet.dismiss()
         }
 
@@ -2223,10 +2294,10 @@ class MainActivity : AppCompatActivity() {
             if (text.isNotBlank()) {
                 if (isHome) appSettings.homeAddress = text else appSettings.workAddress = text
                 updateQuickNavButtons()
-                Toast.makeText(this, "$label address saved", Toast.LENGTH_SHORT).show()
+                showFeedback("$label address saved")
                 sheet.dismiss()
             } else {
-                Toast.makeText(this, "Please enter an address or landmark", Toast.LENGTH_SHORT).show()
+                showFeedback("Please enter an address or landmark", isAlert = true)
             }
         }
 
@@ -2256,9 +2327,9 @@ class MainActivity : AppCompatActivity() {
             val addr = "%.5f,%.5f".format(lat, lng)
             if (isHome) appSettings.homeAddress = addr else appSettings.workAddress = addr
             updateQuickNavButtons()
-            Toast.makeText(this, "Pinned GPS as $label", Toast.LENGTH_SHORT).show()
+            showFeedback("Pinned GPS as $label")
         } else {
-            Toast.makeText(this, "Unable to get current GPS location", Toast.LENGTH_SHORT).show()
+            showFeedback("Unable to get current GPS location", isAlert = true)
         }
     }
 
@@ -2286,7 +2357,7 @@ class MainActivity : AppCompatActivity() {
                 if (odo != null && odo >= 0) {
                     maintenanceManager.setOdometer(odo)
                     recordSyncTime()
-                    Toast.makeText(this, "Odometer updated to %.1f km".format(odo), Toast.LENGTH_SHORT).show()
+                    showFeedback("Odometer updated to %.1f km".format(odo))
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -2449,9 +2520,9 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         " (Will compute mileage on next refill)"
                     }
-                    Toast.makeText(this, "Logged %.2f L for ₹%.0f%s".format(liters, cost, kmplMsg), Toast.LENGTH_LONG).show()
+                    showFeedback("Logged %.2f L for ₹%.0f%s".format(liters, cost, kmplMsg))
                 } else {
-                    Toast.makeText(this, "Please enter valid fuel details", Toast.LENGTH_SHORT).show()
+                    showFeedback("Please enter valid fuel details", isAlert = true)
                 }
             }
             .setNeutralButton("Price: ₹%.1f/L".format(petrolRate)) { _, _ ->
@@ -2481,7 +2552,7 @@ class MainActivity : AppCompatActivity() {
                 val p = input.text.toString().toDoubleOrNull()
                 if (p != null && p > 50.0 && p < 200.0) {
                     appSettings.petrolPricePerLiter = p
-                    Toast.makeText(this, "Petrol price set to ₹%.1f/L".format(p), Toast.LENGTH_SHORT).show()
+                    showFeedback("Petrol price set to ₹%.1f/L".format(p))
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -2527,6 +2598,10 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
                         binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
                         binding.layoutDeviceList.visibility = View.VISIBLE
+
+                        binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                        binding.tvTopConnectionStatus.text = "OFFLINE"
+                        binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
                     }
                     is BleConnectionState.Scanning -> {
                         binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
@@ -2536,6 +2611,10 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
                         binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
                         binding.layoutDeviceList.visibility = View.VISIBLE
+
+                        binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
+                        binding.tvTopConnectionStatus.text = "SEARCHING"
+                        binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
                     }
                     is BleConnectionState.Connecting -> {
                         binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
@@ -2544,6 +2623,10 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.text = "Cancel"
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
                         binding.btnScan.setTextColor(currentTheme.accentColor)
+
+                        binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
+                        binding.tvTopConnectionStatus.text = "CONNECTING"
+                        binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
                     }
                     is BleConnectionState.Connected -> {
                         binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
@@ -2554,6 +2637,10 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.setTextColor(currentTheme.accentColor)
                         binding.layoutDeviceList.visibility = View.GONE
 
+                        binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
+                        binding.tvTopConnectionStatus.text = "CONNECTED"
+                        binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+
                         recordSyncTime()
                     }
                     is BleConnectionState.Error -> {
@@ -2562,6 +2649,10 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.text = "Scan"
                         binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
                         binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
+
+                        binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                        binding.tvTopConnectionStatus.text = "OFFLINE"
+                        binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
                     }
                 }
             }
@@ -3010,7 +3101,7 @@ class MainActivity : AppCompatActivity() {
                 if (updated) {
                     provideHapticFeedback()
                     recordSyncTime()
-                    Toast.makeText(this, "Trip details updated successfully", Toast.LENGTH_SHORT).show()
+                    showFeedback("Trip details updated successfully")
                 }
             }
             .setNeutralButton("Delete") { _, _ ->
@@ -3021,7 +3112,7 @@ class MainActivity : AppCompatActivity() {
                         provideHapticFeedback()
                         rideTracker.deleteTrip(trip.id)
                         recordSyncTime()
-                        Toast.makeText(this, "Trip deleted", Toast.LENGTH_SHORT).show()
+                        showFeedback("Trip deleted")
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
@@ -3190,7 +3281,7 @@ class MainActivity : AppCompatActivity() {
                     recordSyncTime()
                     updateHeroRangeDisplay()
                     provideHapticFeedback()
-                    Toast.makeText(this, "Refuel entry updated!", Toast.LENGTH_SHORT).show()
+                    showFeedback("Refuel entry updated!")
                 }
             }
             .setNeutralButton("Delete Entry") { _, _ ->
@@ -3198,7 +3289,7 @@ class MainActivity : AppCompatActivity() {
                 recordSyncTime()
                 updateHeroRangeDisplay()
                 provideHapticFeedback()
-                Toast.makeText(this, "Refuel entry deleted", Toast.LENGTH_SHORT).show()
+                showFeedback("Refuel entry deleted")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -3228,11 +3319,7 @@ class MainActivity : AppCompatActivity() {
                 updateOwnershipDays()
                 recordSyncTime()
                 provideHapticFeedback()
-                Toast.makeText(
-                    this,
-                    "Purchase date set to ${appSettings.formattedPurchaseDate} (${appSettings.daysOfOwnership} days of ownership)",
-                    Toast.LENGTH_LONG
-                ).show()
+                showFeedback("Purchase date set to ${appSettings.formattedPurchaseDate} (${appSettings.daysOfOwnership} days of ownership)")
             },
             year,
             month,
@@ -3338,9 +3425,9 @@ class MainActivity : AppCompatActivity() {
                     }
                     recordSyncTime()
                     provideHapticFeedback()
-                    Toast.makeText(this, "Logged \"$title\" (%.1f km, %d mins)".format(dist, durMin), Toast.LENGTH_SHORT).show()
+                    showFeedback("Logged \"$title\" (%.1f km, %d mins)".format(dist, durMin))
                 } else {
-                    Toast.makeText(this, "Please enter valid distance and duration", Toast.LENGTH_SHORT).show()
+                    showFeedback("Please enter valid distance and duration", isAlert = true)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -3359,40 +3446,14 @@ class MainActivity : AppCompatActivity() {
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/hospitals+emergency+near+me")))
             } catch (_: Exception) {
-                Toast.makeText(this, "Could not open Maps for nearest hospitals", Toast.LENGTH_SHORT).show()
+                showFeedback("Could not open Maps for nearest hospitals", isAlert = true)
             }
         }
     }
 
     private fun showEmergencyAmbulanceDialog() {
         provideHapticFeedback()
-        val options = arrayOf(
-            "🚑 108 - Medical Ambulance (Free SOS)",
-            "🚨 112 - National Emergency Integrated SOS",
-            "🏥 102 - Maternity & Child Ambulance",
-            "📞 Call ICE Contact (${appSettings.emergencyContactName}: ${appSettings.emergencyContactPhone})"
-        )
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("🚨 Emergency Speed Dialer")
-            .setItems(options) { _, which ->
-                provideHapticFeedback()
-                val dialNumber = when (which) {
-                    0 -> "108"
-                    1 -> "112"
-                    2 -> "102"
-                    3 -> appSettings.emergencyContactPhone.filter { it.isDigit() || it == '+' }
-                    else -> "112"
-                }
-                try {
-                    val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$dialNumber"))
-                    startActivity(dialIntent)
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Unable to dial $dialNumber", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        showEmergencyQuickActionsSheet()
     }
 
     private fun showEmergencyMedicalDialog() {
@@ -3472,7 +3533,7 @@ class MainActivity : AppCompatActivity() {
                 updateEmergencyHomeCard()
                 recordSyncTime()
                 provideHapticFeedback()
-                Toast.makeText(this, "Emergency medical profile saved!", Toast.LENGTH_SHORT).show()
+                showFeedback("Emergency medical profile saved!")
             }
             .setNegativeButton("Cancel", null)
             .show()

@@ -19,28 +19,59 @@
         android:paddingTop="24dp"
         android:paddingBottom="12dp">
 
-        <TextView
-            android:id="@+id/tvTopBarTitle"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:letterSpacing="-0.02"
-            android:text="PulsarNav"
-            android:textColor="@color/text_primary"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/tvTopBarBadge"
+            <TextView
+                android:id="@+id/tvTopBarTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:letterSpacing="-0.02"
+                android:text="PulsarNav"
+                android:textColor="@color/text_primary"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <View
+                android:id="@+id/viewTopConnectionDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/circle_dot"
+                android:backgroundTint="@color/status_disconnected" />
+
+            <TextView
+                android:id="@+id/tvTopConnectionStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:letterSpacing="0.08"
+                android:text="OFFLINE"
+                android:textColor="@color/text_tertiary"
+                android:textSize="9sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTopSos"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/pill_badge"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="4dp"
-            android:text="PULSAR NS200"
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:layout_height="36dp"
+            android:backgroundTint="@color/wine_red_subtle"
+            android:letterSpacing="0.04"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="0dp"
+            android:text="🚨 SOS"
+            android:textColor="@color/wine_red_light"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            app:cornerRadius="18dp"
+            app:strokeColor="@color/wine_red_border"
+            app:strokeWidth="1dp" />
     </LinearLayout>
 
     <View
@@ -103,25 +134,28 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:letterSpacing="0.06"
-                                android:text="DISTANCE TO EMPTY (DTE)"
+                                android:letterSpacing="0.08"
+                                android:text="ESTIMATED RANGE (DTE)"
                                 android:textColor="@color/text_tertiary"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
 
-                            <TextView
-                                android:id="@+id/btnQuickEditDte"
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnRecalibrateCluster"
+                                style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:clickable="true"
-                                android:focusable="true"
-                                android:paddingHorizontal="8dp"
-                                android:paddingVertical="4dp"
-                                android:text="✏️ Edit"
+                                android:layout_height="32dp"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:letterSpacing="0.02"
+                                android:paddingHorizontal="12dp"
+                                android:paddingVertical="0dp"
+                                android:text="🔄  Recalibrate"
                                 android:textColor="@color/wine_red_light"
-                                android:textSize="12sp"
-                                android:textStyle="bold" />
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="16dp"
+                                app:strokeColor="@color/surface_border"
+                                app:strokeWidth="1dp" />
                         </LinearLayout>
 
                         <LinearLayout
@@ -163,27 +197,11 @@
                                 android:id="@+id/tvDteSubtext"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Tap Recalibrate to sync"
+                                android:text="Tap to sync with cluster"
                                 android:textColor="@color/wine_red_light"
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
-
-                        <!-- Recalibrate with Cluster Button -->
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnRecalibrateCluster"
-                            android:layout_width="match_parent"
-                            android:layout_height="@dimen/btn_height_primary"
-                            android:layout_marginTop="12dp"
-                            android:backgroundTint="@color/surface_elevated"
-                            android:letterSpacing="0.02"
-                            android:text="🔄  Recalibrate with Instrument Cluster"
-                            android:textColor="@color/text_primary"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            app:cornerRadius="@dimen/btn_corner_radius"
-                            app:strokeColor="@color/surface_border"
-                            app:strokeWidth="@dimen/card_stroke_width" />
 
                         <View
                             android:layout_width="match_parent"
@@ -941,21 +959,47 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Ather "View Previous Rides" Button -->
-                <com.google.android.material.button.MaterialButton
+                <!-- Ather "View Previous Rides" Card -->
+                <com.google.android.material.card.MaterialCardView
                     android:id="@+id/btnViewPreviousRides"
-                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/btn_height_primary"
                     android:layout_marginBottom="@dimen/card_margin_bottom"
-                    android:backgroundTint="@color/surface_card"
-                    android:gravity="center_vertical|start"
-                    android:paddingHorizontal="16dp"
-                    android:text="View previous rides                                      →"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    app:cornerRadius="@dimen/btn_corner_radius" />
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    app:cardBackgroundColor="@color/surface_card"
+                    app:cardCornerRadius="@dimen/btn_corner_radius"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/surface_border"
+                    app:strokeWidth="@dimen/card_stroke_width">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="16dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="View previous rides"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvViewPreviousRidesArrow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="→"
+                            android:textColor="@color/wine_red_light"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
                 <!-- Ather "Lifetime Stats" Card (With Milestone Progress) -->
                 <com.google.android.material.card.MaterialCardView
@@ -1106,19 +1150,44 @@
                         </LinearLayout>
 
                         <!-- View All Riding Stats Action -->
-                        <com.google.android.material.button.MaterialButton
+                        <com.google.android.material.card.MaterialCardView
                             android:id="@+id/btnViewAllRidingStats"
-                            style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/btn_height_primary"
-                            android:backgroundTint="@color/surface_elevated"
-                            android:gravity="center_vertical|start"
-                            android:paddingHorizontal="18dp"
-                            android:text="View all riding stats                                     →"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            app:cornerRadius="0dp" />
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            app:cardBackgroundColor="@color/surface_elevated"
+                            app:cardCornerRadius="0dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="0dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="18dp">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="View all riding stats"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvViewAllRidingStatsArrow"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="→"
+                                    android:textColor="@color/wine_red_light"
+                                    android:textSize="18sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
