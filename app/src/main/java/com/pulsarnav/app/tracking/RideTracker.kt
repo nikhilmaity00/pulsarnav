@@ -252,6 +252,29 @@ class RideTracker private constructor(private val context: Context) {
         return removed
     }
 
+    /**
+     * Imports an external list of trips (e.g. from Data Vault),
+     * preventing duplicates by ID and updating lifetime statistics.
+     */
+    fun importTrips(importedTrips: List<Trip>): Int {
+        val current = _tripHistory.value.toMutableList()
+        val existingIds = current.map { it.id }.toSet()
+        var addedCount = 0
+        for (t in importedTrips) {
+            if (t.id !in existingIds) {
+                current.add(t)
+                addedCount++
+            }
+        }
+        if (addedCount > 0) {
+            val sorted = current.sortedByDescending { it.startTimeMs }
+            _tripHistory.value = sorted
+            _lifetimeStats.value = calculateLifetimeStats(sorted)
+            saveTrips(sorted)
+        }
+        return addedCount
+    }
+
     private fun saveTrip(trip: Trip) {
         val current = _tripHistory.value.toMutableList()
         current.add(0, trip)

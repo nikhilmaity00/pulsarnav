@@ -19,11 +19,15 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.android.material.snackbar.Snackbar
+import com.pulsarnav.app.data.DataVaultManager
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -94,6 +98,12 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { saveUploadedDocument(it, pendingDocType) }
+    }
+
+    private val vaultFilePicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { importVaultFromUri(it) }
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -817,6 +827,16 @@ class MainActivity : AppCompatActivity() {
         binding.cardProfile.setOnClickListener {
             provideHapticFeedback()
             showEditRiderProfileDialog()
+        }
+
+        // Data Vault & Phone Migration
+        binding.rowVaultQr.setOnClickListener {
+            provideHapticFeedback()
+            showDataVaultBottomSheet(openQrDirectly = true)
+        }
+        binding.rowVaultBackup.setOnClickListener {
+            provideHapticFeedback()
+            showDataVaultBottomSheet(openQrDirectly = false)
         }
     }
 
@@ -2221,6 +2241,141 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    private fun showDataVaultBottomSheet(openQrDirectly: Boolean = false) {
+        val dialog = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
+        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_data_vault, null)
+        dialog.setContentView(sheetView)
+
+        val layoutQr = sheetView.findViewById<LinearLayout>(R.id.layoutQrContainer)
+        val ivQr = sheetView.findViewById<ImageView>(R.id.ivVaultQrCode)
+        val btnShowQr = sheetView.findViewById<MaterialButton>(R.id.btnSheetShowQr)
+        val btnScanQr = sheetView.findViewById<MaterialButton>(R.id.btnSheetScanQr)
+        val btnExportVault = sheetView.findViewById<MaterialButton>(R.id.btnSheetExportVault)
+        val btnImportVault = sheetView.findViewById<MaterialButton>(R.id.btnSheetImportVault)
+
+        btnExportVault?.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
+        btnExportVault?.setTextColor(currentTheme.onPrimaryColor)
+        btnScanQr?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+        btnScanQr?.setTextColor(currentTheme.accentColor)
+
+        if (openQrDirectly) {
+            try {
+                val bitmap = DataVaultManager.getInstance(this).generateSetupQrBitmap(600, 600)
+                ivQr?.setImageBitmap(bitmap)
+                layoutQr?.visibility = View.VISIBLE
+            } catch (e: Exception) {
+                showFeedback("QR Generation failed: ${e.message}", isAlert = true)
+            }
+        }
+
+        btnShowQr?.setOnClickListener {
+            provideHapticFeedback()
+            try {
+                val bitmap = DataVaultManager.getInstance(this).generateSetupQrBitmap(600, 600)
+                ivQr?.setImageBitmap(bitmap)
+                layoutQr?.visibility = if (layoutQr?.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            } catch (e: Exception) {
+                showFeedback("QR Generation failed: ${e.message}", isAlert = true)
+            }
+        }
+
+        btnScanQr?.setOnClickListener {
+            provideHapticFeedback()
+            dialog.dismiss()
+            launchGoogleCodeScanner()
+        }
+
+        btnExportVault?.setOnClickListener {
+            provideHapticFeedback()
+            dialog.dismiss()
+            binding.rootLayout.postDelayed({
+                exportVaultFile()
+            }, 250)
+        }
+
+        btnImportVault?.setOnClickListener {
+            provideHapticFeedback()
+            dialog.dismiss()
+            binding.rootLayout.postDelayed({
+                try {
+                    vaultFilePicker.launch(arrayOf("*/*"))
+                } catch (e: Exception) {
+                    showFeedback("File picker unavailable: ${e.message}", isAlert = true)
+                }
+            }, 250)
+        }
+
+        dialog.show()
+    }
+
+    private fun exportVaultFile() {
+        try {
+            android.util.Log.i("PulsarNav", "Exporting vault file...")
+            val file = DataVaultManager.getInstance(this).exportVaultToFile()
+            android.util.Log.i("PulsarNav", "Vault file created: ${file.absolutePath}, size=${file.length()} bytes")
+            val chooser = DataVaultManager.getInstance(this).createVaultShareIntent(file)
+            startActivity(chooser)
+            showFeedback("Vault bundle exported successfully")
+        } catch (e: Throwable) {
+            android.util.Log.e("PulsarNav", "Export failed", e)
+            showFeedback("Export failed: ${e.message}", isAlert = true)
+        }
+    }
+
+    private fun importVaultFromUri(uri: Uri) {
+        try {
+            val jsonString = contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() } ?: ""
+            if (jsonString.isNotBlank()) {
+                val result = DataVaultManager.getInstance(this).importVaultFromJson(jsonString)
+                result.onSuccess { summary ->
+                    showFeedback("Vault Restored: ${summary.tripsImported} trips, ${summary.fuelEntriesImported} fuel logs for ${summary.riderName}")
+                    refreshAllUiAfterVaultImport()
+                }.onFailure { err ->
+                    showFeedback("Import failed: ${err.message}", isAlert = true)
+                }
+            } else {
+                showFeedback("Selected vault file is empty", isAlert = true)
+            }
+        } catch (e: Exception) {
+            showFeedback("Error reading file: ${e.message}", isAlert = true)
+        }
+    }
+
+    private fun launchGoogleCodeScanner() {
+        try {
+            val scanner = GmsBarcodeScanning.getClient(this)
+            scanner.startScan()
+                .addOnSuccessListener { barcode: Barcode ->
+                    val rawValue = barcode.rawValue
+                    if (!rawValue.isNullOrBlank()) {
+                        val result = DataVaultManager.getInstance(this).importFromQrPayload(rawValue)
+                        result.onSuccess { msg ->
+                            showFeedback("✅ $msg")
+                            refreshAllUiAfterVaultImport()
+                        }.onFailure { err ->
+                            showFeedback("QR Error: ${err.message}", isAlert = true)
+                        }
+                    }
+                }
+                .addOnFailureListener { e: Exception ->
+                    showFeedback("Scan cancelled: ${e.message}", isAlert = true)
+                }
+        } catch (e: Exception) {
+            showFeedback("Google Code Scanner not available: ${e.message}", isAlert = true)
+        }
+    }
+
+    private fun refreshAllUiAfterVaultImport() {
+        updateBikeInfoDisplay()
+        updateDocumentsSummary()
+        updateServiceHistorySummary()
+        updateHeroRangeDisplay()
+        updateEmergencyHomeCard()
+        updateOwnershipDays()
+        updateQuickNavButtons()
+        applyTheme(appSettings.appTheme)
     }
 
     private fun launchNavigationTo(destination: String) {

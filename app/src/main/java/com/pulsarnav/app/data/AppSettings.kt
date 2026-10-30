@@ -314,4 +314,30 @@ class AppSettings(context: Context) {
         set(value) {
             prefs.edit().putString(KEY_DOC_PUC_PATH, value).apply()
         }
+
+    fun getAllSettingsMap(): Map<String, *> = prefs.all
+
+    fun restoreSettingsMap(map: Map<String, *>) {
+        val editor = prefs.edit()
+        for ((k, v) in map) {
+            when (v) {
+                is Boolean -> editor.putBoolean(k, v)
+                is String -> editor.putString(k, v)
+                is Int -> editor.putInt(k, v)
+                is Long -> editor.putLong(k, v)
+                is Float -> editor.putFloat(k, v)
+                is Double -> editor.putFloat(k, v.toFloat())
+            }
+        }
+        editor.apply()
+
+        // Reload StateFlows for instant UI response
+        _autoParkFlow.value = prefs.getBoolean(KEY_AUTO_PARK, true)
+        _rideTrackingFlow.value = prefs.getBoolean(KEY_RIDE_TRACKING, true)
+        _mediaControlFlow.value = prefs.getBoolean(KEY_MEDIA_CONTROL, true)
+        _whatsappAlertsFlow.value = prefs.getBoolean(KEY_WHATSAPP_ALERTS, true)
+        _maintenanceAlertsFlow.value = prefs.getBoolean(KEY_MAINTENANCE_ALERTS, true)
+        _telemetrySyncFlow.value = prefs.getBoolean(KEY_TELEMETRY_SYNC, true)
+        _twoWheelerModeFlow.value = prefs.getBoolean(KEY_TWO_WHEELER_MODE, true)
+    }
 }

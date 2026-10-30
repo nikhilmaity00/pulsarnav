@@ -106,6 +106,29 @@ class FuelLogManager private constructor(private val context: Context) {
         return removed
     }
 
+    /**
+     * Imports an external list of fuel entries (e.g. from Data Vault),
+     * preventing duplicates by ID and recalculating mileage stats.
+     */
+    fun importFuelEntries(importedList: List<FuelEntry>): Int {
+        val current = _entries.value.toMutableList()
+        val existingIds = current.map { it.id }.toSet()
+        var addedCount = 0
+        for (item in importedList) {
+            if (item.id !in existingIds) {
+                current.add(item)
+                addedCount++
+            }
+        }
+        if (addedCount > 0) {
+            val recalculated = recalculateChainedStats(current)
+            _entries.value = recalculated
+            _stats.value = computeStats(recalculated)
+            saveEntries(recalculated)
+        }
+        return addedCount
+    }
+
     private fun recalculateChainedStats(list: List<FuelEntry>): List<FuelEntry> {
         val sorted = list.sortedByDescending { it.timestampMs }
         val result = mutableListOf<FuelEntry>()

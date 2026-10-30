@@ -1,0 +1,416 @@
+package com.pulsarnav.app.data
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.os.Build
+import androidx.core.content.FileProvider
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.MultiFormatWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.pulsarnav.app.location.ParkingManager
+import com.pulsarnav.app.maintenance.FuelEntry
+import com.pulsarnav.app.maintenance.FuelLogManager
+import com.pulsarnav.app.maintenance.MaintenanceManager
+import com.pulsarnav.app.maintenance.ServiceRecord
+import com.pulsarnav.app.tracking.RideTracker
+import com.pulsarnav.app.tracking.Trip
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.EnumMap
+import java.util.Locale
+
+data class VaultImportSummary(
+    val riderName: String,
+    val bikeName: String,
+    val tripsImported: Int,
+    val fuelEntriesImported: Int,
+    val serviceRecordsImported: Int,
+    val totalOdometerKm: Double
+)
+
+class DataVaultManager private constructor(private val context: Context) {
+
+    companion object {
+        const val VAULT_SCHEMA_VERSION = 1
+        const val QR_MAGIC_HEADER = "PNAV_SETUP"
+
+        @Volatile
+        private var instance: DataVaultManager? = null
+
+        fun getInstance(context: Context): DataVaultManager {
+            return instance ?: synchronized(this) {
+                instance ?: DataVaultManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    private val settings = AppSettings.getInstance(context)
+    private val fuelManager = FuelLogManager.getInstance(context)
+    private val rideTracker = RideTracker.getInstance(context)
+    private val maintenanceManager = MaintenanceManager.getInstance(context)
+    private val parkingManager = ParkingManager.getInstance(context)
+
+    // =========================================================================
+    // 1. FULL VAULT EXPORT (JSON BUNDLE & SHARE INTENT)
+    // =========================================================================
+
+    /**
+     * Serializes all 5 data stores into a standardized, versioned JSON vault string.
+     */
+    fun exportVaultJson(): String {
+        val root = JSONObject()
+
+        // Vault Header
+        val header = JSONObject().apply {
+            put("schemaVersion", VAULT_SCHEMA_VERSION)
+            put("appVersion", "1.0.0")
+            put("exportTimestampMs", System.currentTimeMillis())
+            put("deviceModel", Build.MODEL ?: "Android")
+        }
+        root.put("header", header)
+
+        // 1. AppSettings
+        val settingsObj = JSONObject()
+        for ((key, value) in settings.getAllSettingsMap()) {
+            if (value != null) {
+                settingsObj.put(key, value)
+            }
+        }
+        root.put("settings", settingsObj)
+
+        // 2. Fuel Log Entries
+        val fuelArray = JSONArray()
+        for (f in fuelManager.entries.value) {
+            val fObj = JSONObject().apply {
+                put("id", f.id)
+                put("timestampMs", f.timestampMs)
+                put("odometerKm", f.odometerKm)
+                put("liters", f.liters)
+                put("totalCostInr", f.totalCostInr)
+                if (f.calculatedKmpl != null) put("calculatedKmpl", f.calculatedKmpl)
+            }
+            fuelArray.put(fObj)
+        }
+        root.put("fuel_entries", fuelArray)
+
+        // 3. Trip Records
+        val tripArray = JSONArray()
+        for (t in rideTracker.tripHistory.value) {
+            val tObj = JSONObject().apply {
+                put("id", t.id)
+                put("startTimeMs", t.startTimeMs)
+                put("endTimeMs", t.endTimeMs)
+                put("distanceKm", t.distanceKm)
+                put("durationSec", t.durationSec)
+                put("topSpeedKmh", t.topSpeedKmh)
+                put("avgSpeedKmh", t.avgSpeedKmh)
+                put("routeTitle", t.routeTitle)
+            }
+            tripArray.put(tObj)
+        }
+        root.put("trips", tripArray)
+
+        // 4. Service History & Maintenance Status
+        val serviceArray = JSONArray()
+        for (s in maintenanceManager.getServiceHistory()) {
+            val sObj = JSONObject().apply {
+                put("id", s.id)
+                put("date", s.date)
+                put("odoKm", s.odoKm)
+                put("title", s.title)
+                put("workshop", s.workshop)
+                put("notes", s.notes)
+                put("cost", s.cost)
+            }
+            serviceArray.put(sObj)
+        }
+        root.put("service_records", serviceArray)
+
+        val maintObj = JSONObject().apply {
+            put("totalOdometerKm", maintenanceManager.status.value.totalOdometerKm)
+        }
+        root.put("maintenance", maintObj)
+
+        // 5. Last Parked Location
+        parkingManager.lastParkedLocation.value?.let { p ->
+            val parkObj = JSONObject().apply {
+                put("lat", p.latitude)
+                put("lng", p.longitude)
+                put("address", p.address)
+                put("timestampMs", p.timestampMs)
+            }
+            root.put("parking", parkObj)
+        }
+
+        return root.toString(2)
+    }
+
+    /**
+     * Writes the vault to a timestamped file in cacheDir/vault/ and returns it.
+     */
+    fun exportVaultToFile(): File {
+        val vaultDir = File(context.cacheDir, "vault").apply { mkdirs() }
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val file = File(vaultDir, "pulsarnav_vault_$timeStamp.pnav")
+        FileOutputStream(file).use { out ->
+            out.write(exportVaultJson().toByteArray(Charsets.UTF_8))
+        }
+        return file
+    }
+
+    /**
+     * Builds an Android Intent for Quick Share, Drive, Files, or WhatsApp.
+     */
+    fun createVaultShareIntent(file: File): Intent {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "PulsarNav Data Vault Backup")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "PulsarNav Data Vault backup for ${settings.bikeName}. Open this file on your other phone in PulsarNav to restore."
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return Intent.createChooser(shareIntent, "Transfer Data Vault (Quick Share / Drive)")
+    }
+
+    // =========================================================================
+    // 2. FULL VAULT IMPORT & RESTORE
+    // =========================================================================
+
+    /**
+     * Restores all data from a vault JSON string.
+     */
+    fun importVaultFromJson(jsonString: String): Result<VaultImportSummary> {
+        return try {
+            val root = JSONObject(jsonString)
+
+            // Validate header
+            val header = root.optJSONObject("header")
+            val schema = header?.optInt("schemaVersion", 0) ?: 0
+            if (schema < 1) {
+                return Result.failure(IllegalArgumentException("Invalid or unsupported vault file format."))
+            }
+
+            // 1. Restore AppSettings
+            val settingsObj = root.optJSONObject("settings")
+            if (settingsObj != null) {
+                val map = mutableMapOf<String, Any>()
+                val keys = settingsObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = settingsObj.get(k)
+                }
+                settings.restoreSettingsMap(map)
+            }
+
+            // 2. Restore Fuel Log Entries
+            val fuelArray = root.optJSONArray("fuel_entries")
+            var fuelCount = 0
+            if (fuelArray != null) {
+                val importedFuel = mutableListOf<FuelEntry>()
+                for (i in 0 until fuelArray.length()) {
+                    val o = fuelArray.getJSONObject(i)
+                    importedFuel.add(
+                        FuelEntry(
+                            id = o.getString("id"),
+                            timestampMs = o.getLong("timestampMs"),
+                            odometerKm = o.getDouble("odometerKm"),
+                            liters = o.getDouble("liters"),
+                            totalCostInr = o.getDouble("totalCostInr"),
+                            calculatedKmpl = if (o.has("calculatedKmpl")) o.getDouble("calculatedKmpl") else null
+                        )
+                    )
+                }
+                fuelCount = fuelManager.importFuelEntries(importedFuel)
+            }
+
+            // 3. Restore Trips
+            val tripArray = root.optJSONArray("trips")
+            var tripCount = 0
+            if (tripArray != null) {
+                val importedTrips = mutableListOf<Trip>()
+                for (i in 0 until tripArray.length()) {
+                    val o = tripArray.getJSONObject(i)
+                    importedTrips.add(
+                        Trip(
+                            id = o.getString("id"),
+                            startTimeMs = o.getLong("startTimeMs"),
+                            endTimeMs = o.getLong("endTimeMs"),
+                            distanceKm = o.getDouble("distanceKm"),
+                            durationSec = o.getLong("durationSec"),
+                            topSpeedKmh = o.getDouble("topSpeedKmh"),
+                            avgSpeedKmh = o.getDouble("avgSpeedKmh"),
+                            routeTitle = o.optString("routeTitle", "Pulsar Ride")
+                        )
+                    )
+                }
+                tripCount = rideTracker.importTrips(importedTrips)
+            }
+
+            // 4. Restore Service History & Odometer
+            var serviceCount = 0
+            val serviceArray = root.optJSONArray("service_records")
+            if (serviceArray != null) {
+                val importedServices = mutableListOf<ServiceRecord>()
+                for (i in 0 until serviceArray.length()) {
+                    val o = serviceArray.getJSONObject(i)
+                    importedServices.add(
+                        ServiceRecord(
+                            id = o.getString("id"),
+                            date = o.optString("date", "Today"),
+                            odoKm = o.optDouble("odoKm", 0.0),
+                            title = o.optString("title", "Periodic Service"),
+                            workshop = o.optString("workshop", "Bajaj Service"),
+                            notes = o.optString("notes", ""),
+                            cost = o.optString("cost", "₹0")
+                        )
+                    )
+                }
+                val currentServices = maintenanceManager.getServiceHistory()
+                val existingIds = currentServices.map { it.id }.toSet()
+                for (s in importedServices) {
+                    if (s.id !in existingIds) {
+                        currentServices.add(s)
+                        serviceCount++
+                    }
+                }
+                if (serviceCount > 0) {
+                    maintenanceManager.saveServiceHistory(currentServices)
+                }
+            }
+
+            val maintObj = root.optJSONObject("maintenance")
+            val totalOdo = maintObj?.optDouble("totalOdometerKm", -1.0) ?: -1.0
+            if (totalOdo > 0) {
+                maintenanceManager.setOdometer(totalOdo)
+            }
+
+            // 5. Restore Last Parked Location
+            val parkObj = root.optJSONObject("parking")
+            if (parkObj != null) {
+                val addr: String? = if (parkObj.has("address")) parkObj.getString("address") else null
+                parkingManager.saveLocation(
+                    lat = parkObj.getDouble("lat"),
+                    lng = parkObj.getDouble("lng"),
+                    customAddress = addr
+                )
+            }
+
+            Result.success(
+                VaultImportSummary(
+                    riderName = settings.riderName,
+                    bikeName = settings.bikeName,
+                    tripsImported = tripCount,
+                    fuelEntriesImported = fuelCount,
+                    serviceRecordsImported = serviceCount,
+                    totalOdometerKm = maintenanceManager.status.value.totalOdometerKm
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // 3. COMPACT QR CODE MIGRATION (INSTANT SETUP SCAN)
+    // =========================================================================
+
+    /**
+     * Generates a compact payload representing essential setup credentials.
+     */
+    fun createSetupQrPayload(): String {
+        val obj = JSONObject().apply {
+            put("m", QR_MAGIC_HEADER)
+            put("r", settings.riderName)
+            put("p", settings.riderPhone)
+            put("bg", settings.riderBloodGroup)
+            put("in", settings.emergencyContactName)
+            put("ip", settings.emergencyContactPhone)
+            put("mn", settings.medicalNotes)
+            put("bn", settings.bikeName)
+            put("mac", settings.lastConnectedBikeMac)
+            put("reg", settings.bikeRegNumber)
+            put("th", settings.appTheme)
+            put("ha", settings.homeAddress)
+            put("wa", settings.workAddress)
+            put("odo", maintenanceManager.status.value.totalOdometerKm)
+            put("dte", settings.projectedDteKm)
+        }
+        return obj.toString()
+    }
+
+    /**
+     * Renders an obsidian/wine-red styled QR Code Bitmap from the setup payload.
+     */
+    fun generateSetupQrBitmap(width: Int = 600, height: Int = 600): Bitmap {
+        val payload = createSetupQrPayload()
+        val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
+            put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M)
+            put(EncodeHintType.MARGIN, 2)
+            put(EncodeHintType.CHARACTER_SET, "UTF-8")
+        }
+
+        val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, width, height, hints)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+        // Obsidian card background (#1C1B20) with crisp white QR modules (#F8FAFC)
+        val colorDark = Color.parseColor("#F8FAFC")
+        val colorLight = Color.parseColor("#1C1B20")
+
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bitmap.setPixel(x, y, if (matrix.get(x, y)) colorDark else colorLight)
+            }
+        }
+        return bitmap
+    }
+
+    /**
+     * Parses and restores from a scanned QR Code payload.
+     */
+    fun importFromQrPayload(payload: String): Result<String> {
+        return try {
+            val obj = JSONObject(payload)
+            if (obj.optString("m") != QR_MAGIC_HEADER) {
+                return Result.failure(IllegalArgumentException("Not a valid PulsarNav Migration QR code."))
+            }
+
+            if (obj.has("r")) settings.riderName = obj.getString("r")
+            if (obj.has("p")) settings.riderPhone = obj.getString("p")
+            if (obj.has("bg")) settings.riderBloodGroup = obj.getString("bg")
+            if (obj.has("in")) settings.emergencyContactName = obj.getString("in")
+            if (obj.has("ip")) settings.emergencyContactPhone = obj.getString("ip")
+            if (obj.has("mn")) settings.medicalNotes = obj.getString("mn")
+            if (obj.has("bn")) settings.bikeName = obj.getString("bn")
+            if (obj.has("mac")) settings.lastConnectedBikeMac = obj.getString("mac")
+            if (obj.has("reg")) settings.bikeRegNumber = obj.getString("reg")
+            if (obj.has("th")) settings.appTheme = obj.getString("th")
+            if (obj.has("ha")) settings.homeAddress = obj.getString("ha")
+            if (obj.has("wa")) settings.workAddress = obj.getString("wa")
+
+            val odo = obj.optDouble("odo", -1.0)
+            if (odo > 0) maintenanceManager.setOdometer(odo)
+
+            val dte = obj.optInt("dte", -1)
+            if (dte > 0) settings.projectedDteKm = dte
+
+            Result.success("Profile restored for ${settings.riderName} (${settings.bikeName})")
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
