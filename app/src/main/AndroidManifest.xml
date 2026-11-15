@@ -45,18 +45,31 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="tiramisu" />
 
     <!-- Foreground service and notifications -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" tools:targetApi="upside_down_cake" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:targetApi="upside_down_cake" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:targetApi="upside_down_cake" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="tiramisu" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Hardware requirements -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -69,7 +82,8 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -92,23 +106,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" />
                 <data android:scheme="file" />
-                <data android:mimeType="application/json" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:mimeType="application/octet-stream" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
                 <data android:host="*" />
+                <data android:mimeType="*/*" />
                 <data android:pathPattern=".*\\.pnav" />
             </intent-filter>
             <intent-filter>
@@ -118,7 +117,31 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:host="*" />
+                <data android:mimeType="application/json" />
                 <data android:pathPattern=".*\\.pnav\\.json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.pnav\\.json" />
+            </intent-filter>
+
+            <!-- Share from Google Maps or open geo: links directly into PulsarNav Live TFT Map + BLE TBT -->
+            <intent-filter android:label="Route on PulsarNav TFT">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="geo" />
             </intent-filter>
 
             <meta-data
@@ -136,6 +159,18 @@
             </intent-filter>
         </receiver>
 
+        <!-- Android Quick Settings (QS) Tile Service for 1-Tap Bike Casting -->
+        <service
+            android:name=".service.PulsarNavTileService"
+            android:icon="@drawable/ic_launcher"
+            android:label="Bike TFT Cast"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Google Maps Turn-by-Turn + WhatsApp Notification Interceptor -->
         <service
             android:name=".service.GoogleMapsNotificationListener"
@@ -147,11 +182,11 @@
             </intent-filter>
         </service>
 
-        <!-- Keep-Alive Bluetooth Background Service -->
+        <!-- Keep-Alive Bluetooth & TFT Wi-Fi Mirroring Service -->
         <service
             android:name=".service.BikeBleForegroundService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|location" />
+            android:foregroundServiceType="connectedDevice|location|mediaProjection" />
 
         <!-- FileProvider for viewing uploaded digital glovebox documents (RC/Insurance/PUC) -->
         <provider

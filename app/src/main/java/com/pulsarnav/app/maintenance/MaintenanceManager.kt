@@ -16,7 +16,148 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatterBuilder
+import java.time.temporal.ChronoUnit
+import java.util.Locale
 import java.util.UUID
+
+internal enum class GloveboxDocumentStatus {
+    NO_FILE,
+    ATTACHED_NO_EXPIRY,
+    VALID,
+    EXPIRING_SOON,
+    EXPIRED
+}
+
+internal object GloveboxExpiryEvaluator {
+    private const val EXPIRING_SOON_DAYS = 30L
+
+    private val FULL_DATE_FORMATTERS = listOf(
+        "dd MMM yyyy",
+        "d MMM yyyy",
+        "dd MMMM yyyy",
+        "d MMMM yyyy",
+        "dd/MM/yyyy",
+        "d/M/yyyy",
+        "dd-MM-yyyy",
+        "d-M-yyyy",
+        "yyyy-MM-dd",
+        "yyyy/MM/dd"
+    ).map { pattern ->
+        DateTimeFormatterBuilder()
+            .parseCaseInsensitive()
+            .appendPattern(pattern)
+            .toFormatter(Locale.ENGLISH)
+    }
+
+    private val MONTH_YEAR_FORMATTERS = listOf(
+        "MMM yyyy",
+        "MMMM yyyy",
+        "MM/yyyy",
+        "M/yyyy",
+        "MM-yyyy",
+        "yyyy-MM"
+    ).map { pattern ->
+        DateTimeFormatterBuilder()
+            .parseCaseInsensitive()
+            .appendPattern(pattern)
+            .toFormatter(Locale.ENGLISH)
+    }
+
+    fun parseExpiryDate(rawExpiry: String?): LocalDate? {
+        val trimmed = rawExpiry?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+        if (trimmed.isEmpty()) return null
+        for (fmt in FULL_DATE_FORMATTERS) {
+            try {
+                return LocalDate.parse(trimmed, fmt)
+            } catch (_: Exception) {
+            }
+        }
+        for (fmt in MONTH_YEAR_FORMATTERS) {
+            try {
+                return YearMonth.parse(trimmed, fmt).atEndOfMonth()
+            } catch (_: Exception) {
+            }
+        }
+        return null
+    }
+
+    fun evaluate(
+        hasFile: Boolean,
+        rawExpiry: String?,
+        today: LocalDate = LocalDate.now()
+    ): GloveboxDocumentStatus {
+        val expiryDate = parseExpiryDate(rawExpiry)
+        return when {
+            expiryDate != null -> {
+                val daysRemaining = ChronoUnit.DAYS.between(today, expiryDate)
+                when {
+                    daysRemaining < 0L -> GloveboxDocumentStatus.EXPIRED
+                    daysRemaining <= EXPIRING_SOON_DAYS -> GloveboxDocumentStatus.EXPIRING_SOON
+                    hasFile -> GloveboxDocumentStatus.VALID
+                    else -> GloveboxDocumentStatus.NO_FILE
+                }
+            }
+            !hasFile -> GloveboxDocumentStatus.NO_FILE
+            else -> GloveboxDocumentStatus.ATTACHED_NO_EXPIRY
+        }
+    }
+}
+
+internal object MaintenanceMath {
+    fun formatDecimal(value: Double): String = String.format(Locale.US, "%.1f", value)
+
+    fun formatCurrencyAmount(amount: Double): String {
+        val rounded = kotlin.math.round(amount * 100.0) / 100.0
+        return if (kotlin.math.abs(rounded - kotlin.math.round(rounded)) < 0.005) {
+            String.format(Locale.US, "%.0f", rounded)
+        } else {
+            String.format(Locale.US, "%.2f", rounded)
+        }
+    }
+
+    fun defaultServiceTargetOdo(odoKm: Double): Double = when {
+        odoKm < 750.0 -> 500.0 // 1st Service milestone for new motorcycle
+        odoKm < 5000.0 -> 5000.0 // 2nd Service
+        odoKm < 10000.0 -> 10000.0 // 3rd Service
+        else -> ((odoKm / 5000.0).toInt() + 1) * 5000.0
+    }
+
+    fun parseDecimal(raw: String?): Double? =
+        raw?.trim()?.replace(',', '.')?.toDoubleOrNull()
+
+    fun parseCurrencyAmount(raw: String?): Double? {
+        val cleaned = raw?.replace(Regex("[^0-9.,]"), "").orEmpty()
+        if (cleaned.isEmpty()) return null
+        val lastComma = cleaned.lastIndexOf(',')
+        val lastDot = cleaned.lastIndexOf('.')
+        val normalized = when {
+            lastComma >= 0 && lastDot >= 0 -> {
+                if (lastComma > lastDot) {
+                    cleaned.replace(".", "").replace(',', '.')
+                } else {
+                    cleaned.replace(",", "")
+                }
+            }
+            lastComma >= 0 -> {
+                val firstComma = cleaned.indexOf(',')
+                val fractionalDigits = cleaned.length - lastComma - 1
+                if (firstComma != lastComma || fractionalDigits == 3) {
+                    cleaned.replace(",", "")
+                } else {
+                    cleaned.replace(',', '.')
+                }
+            }
+            else -> {
+                val firstDot = cleaned.indexOf('.')
+                if (firstDot != lastDot) cleaned.replace(".", "") else cleaned
+            }
+        }
+        return normalized.toDoubleOrNull()
+    }
+}
 
 data class ServiceItem(
     val name: String,
@@ -34,7 +175,7 @@ data class ServiceRecord(
     var items: List<ServiceItem> = emptyList()
 ) {
     fun getNumericCost(): Double {
-        val parsedCost = cost.replace(Regex("[^0-9.]"), "").toDoubleOrNull() ?: 0.0
+        val parsedCost = MaintenanceMath.parseCurrencyAmount(cost) ?: 0.0
         val itemsSum = items.sumOf { it.cost }
         return if (parsedCost > 0.0) parsedCost else itemsSum
     }
@@ -82,25 +223,20 @@ class MaintenanceManager private constructor(private val context: Context) {
     val status: StateFlow<MaintenanceStatus> = _status.asStateFlow()
 
     private fun computeStatus(): MaintenanceStatus {
-        val odo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
-        val lastLube = prefs.getString(KEY_LAST_CHAIN_LUBE, "0.0")?.toDoubleOrNull() ?: 0.0
+        val odo = MaintenanceMath.parseDecimal(prefs.getString(KEY_ODO, "0.0")) ?: 0.0
+        val lastLube = MaintenanceMath.parseDecimal(prefs.getString(KEY_LAST_CHAIN_LUBE, "0.0")) ?: 0.0
 
         val lubeElapsed = (odo - lastLube).coerceAtLeast(0.0)
         val lubeRemaining = (CHAIN_LUBE_INTERVAL_KM - lubeElapsed).coerceAtLeast(0.0)
         val lubePercent = ((lubeRemaining / CHAIN_LUBE_INTERVAL_KM) * 100).toInt().coerceIn(0, 100)
 
-        val rawTarget = prefs.getString(KEY_NEXT_SERVICE_TARGET_ODO, null)?.toDoubleOrNull()
-        val targetOdo = rawTarget ?: when {
-            odo < 750.0 -> 500.0 // 1st Service milestone for new motorcycle
-            odo < 5000.0 -> 5000.0 // 2nd Service
-            odo < 10000.0 -> 10000.0 // 3rd Service
-            else -> ((odo / 5000.0).toInt() + 1) * 5000.0
-        }
+        val rawTarget = MaintenanceMath.parseDecimal(prefs.getString(KEY_NEXT_SERVICE_TARGET_ODO, null))
+        val targetOdo = rawTarget ?: MaintenanceMath.defaultServiceTargetOdo(odo)
 
         val isOverdue = odo > targetOdo
         val overdueKm = if (isOverdue) (odo - targetOdo) else 0.0
         val serviceRemaining = if (isOverdue) 0.0 else (targetOdo - odo)
-        val serviceInterval = if (targetOdo <= 750.0) 500.0 else 5000.0
+        val serviceInterval = if (targetOdo <= 750.0) 500.0 else SERVICE_INTERVAL_KM
         val servicePercent = if (isOverdue) 0 else ((serviceRemaining / serviceInterval) * 100).toInt().coerceIn(0, 100)
 
         return MaintenanceStatus(
@@ -118,67 +254,76 @@ class MaintenanceManager private constructor(private val context: Context) {
     }
 
     fun setNextServiceTargetOdo(targetKm: Double) {
-        prefs.edit().putString(KEY_NEXT_SERVICE_TARGET_ODO, "%.1f".format(targetKm)).apply()
+        prefs.edit().putString(KEY_NEXT_SERVICE_TARGET_ODO, MaintenanceMath.formatDecimal(targetKm)).apply()
         _status.value = computeStatus()
     }
 
-    fun getLastChainLubeKm(): Double = prefs.getString(KEY_LAST_CHAIN_LUBE, "0.0")?.toDoubleOrNull() ?: 0.0
-    fun getLastServiceKm(): Double = prefs.getString(KEY_LAST_SERVICE, "0.0")?.toDoubleOrNull() ?: 0.0
-    fun getNextServiceTargetOdoKm(): Double = prefs.getString(KEY_NEXT_SERVICE_TARGET_ODO, "500.0")?.toDoubleOrNull() ?: 500.0
+    fun getLastChainLubeKm(): Double =
+        MaintenanceMath.parseDecimal(prefs.getString(KEY_LAST_CHAIN_LUBE, "0.0")) ?: 0.0
+
+    fun getLastServiceKm(): Double =
+        MaintenanceMath.parseDecimal(prefs.getString(KEY_LAST_SERVICE, "0.0")) ?: 0.0
+
+    fun getNextServiceTargetOdoKm(): Double =
+        _status.value.nextServiceTargetOdoKm
 
     fun setLastChainLubeKm(km: Double) {
-        prefs.edit().putString(KEY_LAST_CHAIN_LUBE, "%.1f".format(km)).apply()
+        prefs.edit().putString(KEY_LAST_CHAIN_LUBE, MaintenanceMath.formatDecimal(km)).apply()
         _status.value = computeStatus()
     }
 
     fun setLastServiceKm(km: Double) {
-        prefs.edit().putString(KEY_LAST_SERVICE, "%.1f".format(km)).apply()
+        prefs.edit().putString(KEY_LAST_SERVICE, MaintenanceMath.formatDecimal(km)).apply()
         _status.value = computeStatus()
     }
 
     fun rescheduleNextService(addKm: Double) {
-        val odo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
+        val odo = MaintenanceMath.parseDecimal(prefs.getString(KEY_ODO, "0.0")) ?: 0.0
         setNextServiceTargetOdo(odo + addKm)
     }
 
     fun addDistance(km: Double) {
-        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
+        val currentOdo = MaintenanceMath.parseDecimal(prefs.getString(KEY_ODO, "0.0")) ?: 0.0
         val newOdo = currentOdo + km
-        prefs.edit().putString(KEY_ODO, "%.1f".format(newOdo)).apply()
+        prefs.edit().putString(KEY_ODO, MaintenanceMath.formatDecimal(newOdo)).apply()
         _status.value = computeStatus()
         checkAndSendMaintenanceReminders()
     }
 
     fun setOdometer(newOdo: Double) {
-        prefs.edit().putString(KEY_ODO, "%.1f".format(newOdo)).apply()
+        prefs.edit().putString(KEY_ODO, MaintenanceMath.formatDecimal(newOdo)).apply()
         _status.value = computeStatus()
         checkAndSendMaintenanceReminders()
     }
 
     fun markChainLubed() {
-        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
-        prefs.edit().putString(KEY_LAST_CHAIN_LUBE, currentOdo.toString()).apply()
+        val currentOdo = MaintenanceMath.parseDecimal(prefs.getString(KEY_ODO, "0.0")) ?: 0.0
+        prefs.edit().putString(KEY_LAST_CHAIN_LUBE, MaintenanceMath.formatDecimal(currentOdo)).apply()
         _status.value = computeStatus()
         checkAndSendMaintenanceReminders()
     }
 
     fun markServiceDone() {
-        val currentOdo = prefs.getString(KEY_ODO, "0.0")?.toDoubleOrNull() ?: 0.0
-        prefs.edit().putString(KEY_LAST_SERVICE, currentOdo.toString()).apply()
+        val currentOdo = MaintenanceMath.parseDecimal(prefs.getString(KEY_ODO, "0.0")) ?: 0.0
+        prefs.edit().putString(KEY_LAST_SERVICE, MaintenanceMath.formatDecimal(currentOdo)).apply()
 
         // Advance to next milestone
-        val currentTarget = prefs.getString(KEY_NEXT_SERVICE_TARGET_ODO, null)?.toDoubleOrNull() ?: 500.0
+        val currentTarget = MaintenanceMath.parseDecimal(prefs.getString(KEY_NEXT_SERVICE_TARGET_ODO, null))
+            ?: MaintenanceMath.defaultServiceTargetOdo(currentOdo)
         val nextTarget = when {
             currentTarget <= 750.0 -> 5000.0 // 1st service done -> 2nd is 5,000 km
             currentTarget <= 5000.0 -> 10000.0 // 2nd service done -> 3rd is 10,000 km
-            else -> currentOdo + 5000.0
+            else -> currentOdo + SERVICE_INTERVAL_KM
         }
-        prefs.edit().putString(KEY_NEXT_SERVICE_TARGET_ODO, "%.1f".format(nextTarget)).apply()
+        prefs.edit().putString(KEY_NEXT_SERVICE_TARGET_ODO, MaintenanceMath.formatDecimal(nextTarget)).apply()
         _status.value = computeStatus()
         checkAndSendMaintenanceReminders()
     }
 
     fun checkAndSendMaintenanceReminders() {
+        if (!AppSettings.getInstance(context).isMaintenanceAlertsEnabled) {
+            return
+        }
         try {
             val currentStatus = _status.value
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -189,24 +334,22 @@ class MaintenanceManager private constructor(private val context: Context) {
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    "pulsarnav_maintenance_channel",
-                    "Maintenance & Service Alerts",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Alerts for upcoming chain lube and scheduled periodic maintenance"
-                }
-                notificationManager.createNotificationChannel(channel)
+            val channel = NotificationChannel(
+                "pulsarnav_maintenance_channel",
+                "Maintenance & Service Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts for upcoming chain lube and scheduled periodic maintenance"
             }
+            notificationManager.createNotificationChannel(channel)
 
             val alertPrefs = context.getSharedPreferences("pulsarnav_maintenance_alerts", Context.MODE_PRIVATE)
+            val lubeCycleKey = kotlin.math.round(getLastChainLubeKm() * 10.0).toLong()
 
-            // 1. Chain Lube Reminder (1..100 km threshold)
+            // 1. Chain Lube Reminder (1..100 km threshold based on elapsed distance since last lube)
             if (currentStatus.chainLubeRemainingKm in 1.0..100.0) {
-                val lubeMilestone = (currentStatus.totalOdometerKm / 500.0).toInt()
-                val lastMilestone = alertPrefs.getInt("last_chain_milestone", -1)
-                if (lubeMilestone != lastMilestone) {
+                val lastNotifiedCycle = alertPrefs.getLong("last_chain_soon_cycle", Long.MIN_VALUE)
+                if (lubeCycleKey != lastNotifiedCycle) {
                     val notif = NotificationCompat.Builder(context, "pulsarnav_maintenance_channel")
                         .setSmallIcon(R.drawable.ic_launcher)
                         .setContentTitle("Chain Lube Due Soon")
@@ -216,12 +359,11 @@ class MaintenanceManager private constructor(private val context: Context) {
                         .setAutoCancel(true)
                         .build()
                     notificationManager.notify(2001, notif)
-                    alertPrefs.edit().putInt("last_chain_milestone", lubeMilestone).apply()
+                    alertPrefs.edit().putLong("last_chain_soon_cycle", lubeCycleKey).apply()
                 }
             } else if (currentStatus.chainLubeRemainingKm <= 0.0) {
-                val lubeMilestone = (currentStatus.totalOdometerKm / 500.0).toInt()
-                val lastMilestone = alertPrefs.getInt("last_chain_overdue_milestone", -1)
-                if (lubeMilestone != lastMilestone) {
+                val lastOverdueCycle = alertPrefs.getLong("last_chain_overdue_cycle", Long.MIN_VALUE)
+                if (lubeCycleKey != lastOverdueCycle) {
                     val notif = NotificationCompat.Builder(context, "pulsarnav_maintenance_channel")
                         .setSmallIcon(R.drawable.ic_launcher)
                         .setContentTitle("Chain Lubrication OVERDUE")
@@ -230,7 +372,7 @@ class MaintenanceManager private constructor(private val context: Context) {
                         .setAutoCancel(true)
                         .build()
                     notificationManager.notify(2001, notif)
-                    alertPrefs.edit().putInt("last_chain_overdue_milestone", lubeMilestone).apply()
+                    alertPrefs.edit().putLong("last_chain_overdue_cycle", lubeCycleKey).apply()
                 }
             }
 
@@ -336,12 +478,8 @@ class MaintenanceManager private constructor(private val context: Context) {
             array.put(obj)
         }
         prefs.edit().putString(KEY_SERVICE_HISTORY_JSON, array.toString()).apply()
-        // Check if latest service can update last_service_km
         val maxServiceOdo = records.maxOfOrNull { it.odoKm } ?: 0.0
-        val currentLastService = prefs.getString(KEY_LAST_SERVICE, "0.0")?.toDoubleOrNull() ?: 0.0
-        if (maxServiceOdo > currentLastService) {
-            prefs.edit().putString(KEY_LAST_SERVICE, maxServiceOdo.toString()).apply()
-        }
+        prefs.edit().putString(KEY_LAST_SERVICE, MaintenanceMath.formatDecimal(maxServiceOdo)).apply()
         _status.value = computeStatus()
     }
 

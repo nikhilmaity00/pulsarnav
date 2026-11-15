@@ -8,6 +8,8 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.util.Log
 import com.pulsarnav.app.model.Maneuver
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Identifies the turn maneuver from Google Maps notification icons by shape-matching against
@@ -73,34 +75,51 @@ object ManeuverMatcher {
         val score: Double
     )
 
-    private val templates = mutableListOf<BooleanArray>()
-    private val templateManeuvers = mutableListOf<Maneuver>()
-    private val templateNames = mutableListOf<String>()
+    private data class TemplateBank(
+        val templates: List<BooleanArray>,
+        val maneuvers: List<Maneuver>,
+        val names: List<String>
+    )
 
     @Volatile
-    private var isReady = false
+    private var templateBank: TemplateBank? = null
     @Volatile
-    private var isBuilding = false
+    private var lastBuildAttemptMs = 0L
+    @Volatile
     private var appContext: Context? = null
+    private val primeScheduled = AtomicBoolean(false)
+    private val primeExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "maneuver-matcher-prime").apply { isDaemon = true }
+    }
 
     fun prime(context: Context) {
         if (appContext == null) {
             appContext = context.applicationContext
         }
-        if (!isReady && !isBuilding) {
-            Thread({
-                ensureBuilt()
-            }, "maneuver-matcher-prime").start()
+        if (templateBank == null && primeScheduled.compareAndSet(false, true)) {
+            primeExecutor.execute {
+                try {
+                    ensureBuilt()
+                } finally {
+                    primeScheduled.set(false)
+                }
+            }
         }
     }
 
     @Synchronized
     private fun ensureBuilt() {
-        if (isReady || isBuilding) return
+        if (templateBank != null) return
         val ctx = appContext ?: return
-        isBuilding = true
+        val now = System.currentTimeMillis()
+        if (now - lastBuildAttemptMs < 60_000L) return
+        lastBuildAttemptMs = now
 
         val startMs = System.currentTimeMillis()
+        val builtTemplates = mutableListOf<BooleanArray>()
+        val builtManeuvers = mutableListOf<Maneuver>()
+        val builtNames = mutableListOf<String>()
+
         try {
             val mapsContext = ctx.createPackageContext(GMAPS_PKG, Context.CONTEXT_IGNORE_SECURITY)
             val res: Resources = mapsContext.resources
@@ -116,41 +135,56 @@ object ManeuverMatcher {
                 } ?: continue
 
                 val bm = Bitmap.createBitmap(RENDER_SIZE, RENDER_SIZE, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bm)
-                drawable?.setBounds(0, 0, RENDER_SIZE, RENDER_SIZE)
-                drawable?.draw(canvas)
-
-                val normalized = normalize(bm)
-                bm.recycle()
+                val normalized = try {
+                    val canvas = Canvas(bm)
+                    drawable?.setBounds(0, 0, RENDER_SIZE, RENDER_SIZE)
+                    drawable?.draw(canvas)
+                    normalize(bm)
+                } finally {
+                    bm.recycle()
+                }
 
                 if (normalized != null) {
-                    templates.add(normalized)
-                    templateManeuvers.add(maneuverFor(name))
-                    templateNames.add(name)
+                    builtTemplates.add(normalized)
+                    builtManeuvers.add(maneuverFor(name))
+                    builtNames.add(name)
                 }
             }
-            isReady = true
-            Log.i(TAG, "Maneuver templates built: ${templates.size} in ${System.currentTimeMillis() - startMs}ms")
+            if (builtTemplates.isNotEmpty()) {
+                templateBank = TemplateBank(builtTemplates, builtManeuvers, builtNames)
+            }
+            Log.i(TAG, "Maneuver templates built: ${builtTemplates.size} in ${System.currentTimeMillis() - startMs}ms")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to build Google Maps maneuver templates: ${e.message}")
-        } finally {
-            isBuilding = false
         }
     }
 
     fun match(iconObj: Any?): MatchResult? {
         if (iconObj == null) return null
-        ensureBuilt()
-        if (!isReady || templates.isEmpty()) return null
+        val bank = templateBank
+        if (bank == null) {
+            appContext?.let { prime(it) }
+            return null
+        }
+        if (bank.templates.isEmpty()) return null
 
-        val bitmap = toBitmap(iconObj) ?: return null
-        val mask = normalize(bitmap) ?: return null
+        val allocatedBitmap: Bitmap? = if (iconObj is Icon) toBitmap(iconObj) else null
+        val bitmap: Bitmap = when {
+            iconObj is Bitmap -> iconObj
+            allocatedBitmap != null -> allocatedBitmap
+            else -> return null
+        }
+        val mask = try {
+            normalize(bitmap) ?: return null
+        } finally {
+            allocatedBitmap?.recycle()
+        }
 
         var bestIdx = -1
         var bestDiff = Int.MAX_VALUE
 
-        for (i in templates.indices) {
-            val diff = xorDiff(mask, templates[i])
+        for (i in bank.templates.indices) {
+            val diff = xorDiff(mask, bank.templates[i])
             if (diff < bestDiff) {
                 bestDiff = diff
                 bestIdx = i
@@ -160,8 +194,8 @@ object ManeuverMatcher {
         if (bestIdx < 0) return null
         val score = 1.0 - (bestDiff.toDouble() / (GRID_SIZE * GRID_SIZE))
         return MatchResult(
-            templateName = templateNames[bestIdx],
-            maneuver = templateManeuvers[bestIdx],
+            templateName = bank.names[bestIdx],
+            maneuver = bank.maneuvers[bestIdx],
             score = score
         )
     }
@@ -193,12 +227,24 @@ object ManeuverMatcher {
     }
 
     private fun normalize(b: Bitmap): BooleanArray? {
+        if (b.isRecycled) return null
         val w = b.width
         val h = b.height
         if (w <= 0 || h <= 0) return null
 
+        val swBitmap: Bitmap = if (b.config == Bitmap.Config.HARDWARE) {
+            b.copy(Bitmap.Config.ARGB_8888, false) ?: return null
+        } else {
+            b
+        }
         val pixels = IntArray(w * h)
-        b.getPixels(pixels, 0, w, 0, 0, w, h)
+        try {
+            swBitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        } finally {
+            if (swBitmap !== b) {
+                swBitmap.recycle()
+            }
+        }
 
         var hasAlpha = false
         for (p in pixels) {

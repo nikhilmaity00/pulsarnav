@@ -15,6 +15,7 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.pulsarnav.app.ble.BajajBleManager
+import com.pulsarnav.app.debug.DebugLogRepository
 import com.pulsarnav.app.protocol.CallState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +32,6 @@ class CallManager private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "PulsarCallManager"
-        private const val LONG_PRESS_THRESHOLD_MS = 750L
 
         @Volatile
         private var INSTANCE: CallManager? = null
@@ -50,19 +50,31 @@ class CallManager private constructor(private val context: Context) {
     private val _callInfo = MutableStateFlow(ActiveCallInfo(CallState.NO_CALL, null, null, 0))
     val callInfo: StateFlow<ActiveCallInfo> = _callInfo
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val lookupExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val stateLock = Any()
+
     private var wasRinging = false
+    private var wasRejectedByUser = false
     private var lastIncomingNumber: String? = null
     private var lastIncomingName: String? = null
+    private var outgoingDialStartedAtMs = 0L
     private var missedCount = 0
-
-    private var buttonPressStartTime = 0L
+    private var incomingCallGeneration = 0L
 
     private var isInitialized = false
+    private var isReceiverRegistered = false
+    private var registeredTelephonyCallback: Any? = null
+    @Suppress("DEPRECATION")
+    private var registeredPhoneStateListener: PhoneStateListener? = null
+    private var lastDispatchedCallState: CallState? = null
+    private var lastDispatchedCallerName: String? = null
 
     private val phoneStateBroadcastReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == TelephonyManager.ACTION_PHONE_STATE_CHANGED) {
                 val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
+                @Suppress("DEPRECATION")
                 val incomingNum = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
                 when (stateStr) {
                     TelephonyManager.EXTRA_STATE_RINGING -> {
@@ -95,36 +107,32 @@ class CallManager private constructor(private val context: Context) {
 
         try {
             val filter = android.content.IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(phoneStateBroadcastReceiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                context.registerReceiver(phoneStateBroadcastReceiver, filter)
-            }
+            ContextCompat.registerReceiver(context, phoneStateBroadcastReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+            isReceiverRegistered = true
         } catch (e: Exception) {
             Log.w(TAG, "Dynamic receiver registration for PHONE_STATE: ${e.message}")
         }
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                telephonyManager?.registerTelephonyCallback(
-                    context.mainExecutor,
-                    object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-                        override fun onCallStateChanged(state: Int) {
-                            handleCallState(state, null)
-                        }
+                val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                    override fun onCallStateChanged(state: Int) {
+                        handleCallState(state, null)
                     }
-                )
+                }
+                telephonyManager?.registerTelephonyCallback(context.mainExecutor, callback)
+                registeredTelephonyCallback = callback
             } else {
                 @Suppress("DEPRECATION")
-                telephonyManager?.listen(
-                    object : PhoneStateListener() {
-                        @Deprecated("Deprecated in Java")
-                        override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                            handleCallState(state, phoneNumber)
-                        }
-                    },
-                    PhoneStateListener.LISTEN_CALL_STATE
-                )
+                val listener = object : PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                        handleCallState(state, phoneNumber)
+                    }
+                }
+                @Suppress("DEPRECATION")
+                telephonyManager?.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+                registeredPhoneStateListener = listener
             }
             Log.i(TAG, "Telephony listener registered successfully")
         } catch (e: SecurityException) {
@@ -132,107 +140,169 @@ class CallManager private constructor(private val context: Context) {
         }
     }
 
+    fun release() {
+        if (isReceiverRegistered) {
+            try {
+                context.unregisterReceiver(phoneStateBroadcastReceiver)
+            } catch (_: Exception) {}
+            isReceiverRegistered = false
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (registeredTelephonyCallback as? TelephonyCallback)?.let {
+                    telephonyManager?.unregisterTelephonyCallback(it)
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                registeredPhoneStateListener?.let {
+                    telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE)
+                }
+            }
+        } catch (_: Exception) {}
+        registeredTelephonyCallback = null
+        registeredPhoneStateListener = null
+        isInitialized = false
+    }
+
     fun onIncomingNumberDetected(number: String) {
-        lastIncomingNumber = number
-        lastIncomingName = resolveContactName(number)
-        Log.i(TAG, "Incoming call from $lastIncomingName ($number)")
+        val (generation, shouldResolve) = synchronized(stateLock) {
+            val sameIncomingNumber = wasRinging && lastIncomingNumber == number
+            val prevName = lastIncomingName
+            val gen = if (sameIncomingNumber) {
+                incomingCallGeneration
+            } else {
+                wasRinging = true
+                lastIncomingNumber = number
+                incomingCallGeneration + 1L
+            }
+            incomingCallGeneration = gen
+            val resolvedFallback = if (sameIncomingNumber && !prevName.isNullOrBlank()) prevName else number
+            lastIncomingName = resolvedFallback
+            if (!sameIncomingNumber) {
+                Log.i(
+                    TAG,
+                    "Incoming call from ${com.pulsarnav.app.debug.DebugLogRepository.maskPersonName(resolvedFallback)} (${com.pulsarnav.app.debug.DebugLogRepository.maskPhoneNumber(number)})"
+                )
+            }
+            dispatchCallUpdateLocked(CallState.INCOMING_CALL, resolvedFallback, number)
+            Pair(gen, !sameIncomingNumber || resolvedFallback == number)
+        }
 
-        _callInfo.value = ActiveCallInfo(
-            state = CallState.INCOMING_CALL,
-            callerName = lastIncomingName,
-            callerNumber = lastIncomingNumber,
-            missedCallCount = missedCount
-        )
+        if (!shouldResolve) return
 
-        bleManager.updateCallState(
-            callState = CallState.INCOMING_CALL,
-            callerName = lastIncomingName,
-            callerNumber = lastIncomingNumber
-        )
+        lookupExecutor.execute {
+            val resolved = resolveContactName(number)
+            mainHandler.post {
+                synchronized(stateLock) {
+                    if (wasRinging &&
+                        incomingCallGeneration == generation &&
+                        lastIncomingNumber == number &&
+                        resolved != lastIncomingName
+                    ) {
+                        lastIncomingName = resolved
+                        dispatchCallUpdateLocked(CallState.INCOMING_CALL, resolved, number)
+                    }
+                }
+            }
+        }
     }
 
     private fun handleCallState(state: Int, incomingNumber: String?) {
-        val number = incomingNumber ?: lastIncomingNumber
         when (state) {
             TelephonyManager.CALL_STATE_RINGING -> {
-                wasRinging = true
+                val number = synchronized(stateLock) {
+                    incomingNumber?.takeIf { it.isNotBlank() } ?: lastIncomingNumber
+                }
                 if (!number.isNullOrBlank()) {
                     onIncomingNumberDetected(number)
                 } else {
-                    _callInfo.value = ActiveCallInfo(CallState.INCOMING_CALL, "Incoming Call", null, missedCount)
-                    bleManager.updateCallState(CallState.INCOMING_CALL, "Incoming Call", null)
+                    synchronized(stateLock) {
+                        if (!wasRinging) {
+                            incomingCallGeneration++
+                        }
+                        wasRinging = true
+                        wasRejectedByUser = false
+                        dispatchCallUpdateLocked(CallState.INCOMING_CALL, "Incoming Call", null)
+                    }
                 }
             }
             TelephonyManager.CALL_STATE_OFFHOOK -> {
-                val name = lastIncomingName ?: "Active Call"
-                wasRinging = false
-                _callInfo.value = ActiveCallInfo(CallState.ACTIVE_CALL, name, number, missedCount)
-                bleManager.updateCallState(CallState.ACTIVE_CALL, name, number)
+                synchronized(stateLock) {
+                    val number = incomingNumber?.takeIf { it.isNotBlank() } ?: lastIncomingNumber
+                    val isRecentOutgoing = !wasRinging &&
+                        outgoingDialStartedAtMs > 0L &&
+                        (android.os.SystemClock.elapsedRealtime() - outgoingDialStartedAtMs) < 2_500L
+                    val targetState = if (isRecentOutgoing) CallState.OUTGOING_CALL else CallState.ACTIVE_CALL
+                    val fallbackLabel = if (targetState == CallState.OUTGOING_CALL) "Dialing..." else "Active Call"
+                    val name = lastIncomingName ?: fallbackLabel
+                    wasRinging = false
+                    incomingCallGeneration++
+                    dispatchCallUpdateLocked(targetState, name, number)
+                }
             }
             TelephonyManager.CALL_STATE_IDLE -> {
-                if (wasRinging) {
-                    // Call was missed
-                    missedCount++
-                    val name = lastIncomingName ?: "Unknown"
-                    val phone = lastIncomingNumber ?: ""
-                    Log.i(TAG, "Missed call recorded from $name ($phone). Total missed: $missedCount")
-                    bleManager.sendMissedCall(name, phone, missedCount)
+                var finishedName: String? = null
+                synchronized(stateLock) {
+                    if (wasRinging && !wasRejectedByUser) {
+                        missedCount++
+                        val resolvedName = lastIncomingName ?: "Unknown"
+                        val resolvedNumber = lastIncomingNumber ?: ""
+                        finishedName = resolvedName
+                        Log.i(
+                            TAG,
+                            "Missed call recorded from ${com.pulsarnav.app.debug.DebugLogRepository.maskPersonName(resolvedName)} (${com.pulsarnav.app.debug.DebugLogRepository.maskPhoneNumber(resolvedNumber)}). Total missed: $missedCount"
+                        )
+                        bleManager.sendMissedCall(resolvedName, resolvedNumber, missedCount)
+                    }
+                    wasRinging = false
+                    wasRejectedByUser = false
+                    outgoingDialStartedAtMs = 0L
+                    lastIncomingNumber = null
+                    lastIncomingName = null
+                    incomingCallGeneration++
+                    dispatchCallUpdateLocked(CallState.NO_CALL, null, null)
                 }
-                wasRinging = false
-                lastIncomingNumber = null
-                lastIncomingName = null
-                _callInfo.value = ActiveCallInfo(CallState.NO_CALL, null, null, missedCount)
-                bleManager.updateCallState(CallState.NO_CALL, null, null, missedCallCount = missedCount)
+                // Wait briefly for Android's CallLog ContentProvider to commit the finished call entry
+                mainHandler.postDelayed({ bleManager.syncPhonebookAndCalls() }, 900L)
+                if (finishedName != null) {
+                    Log.d(TAG, "Scheduled recent-call log sync after missed call")
+                }
             }
         }
     }
 
-    /**
-     * Handlebar Button Interception:
-     * - Incoming Call: Single Click (<750ms) = Accept Call, Long Press (>=750ms) = Reject Call
-     * - Active Call: Long Press (>=750ms) = End Call
-     * - Normal Riding (No Call): Delegated to Media Control (Single = Play/Pause, Long = Next)
-     */
-    fun onHandlebarButtonStateChanged(isPressed: Boolean) {
-        if (isPressed) {
-            buttonPressStartTime = System.currentTimeMillis()
-            Log.d(TAG, "Handlebar button DOWN")
-        } else {
-            val duration = System.currentTimeMillis() - buttonPressStartTime
-            Log.d(TAG, "Handlebar button UP (held for ${duration}ms)")
-            val isLongPress = duration >= LONG_PRESS_THRESHOLD_MS
-
-            when (_callInfo.value.state) {
-                CallState.INCOMING_CALL -> {
-                    if (isLongPress) {
-                        Log.i(TAG, "Handlebar button LONG PRESS detected -> Rejecting Call")
-                        rejectIncomingCall()
-                    } else {
-                        Log.i(TAG, "Handlebar button SINGLE CLICK detected -> Accepting Call")
-                        acceptIncomingCall()
-                    }
-                }
-                CallState.ACTIVE_CALL -> {
-                    if (isLongPress) {
-                        Log.i(TAG, "Handlebar button LONG PRESS detected -> Ending Active Call")
-                        rejectIncomingCall()
-                    }
-                }
-                else -> {
-                    // No active call: Route to Media Control
-                    com.pulsarnav.app.media.MediaControlManager.getInstance(context).handleHandlebarButton(isLongPress)
-                }
-            }
+    private fun dispatchCallUpdateLocked(state: CallState, callerName: String?, callerNumber: String?) {
+        if (lastDispatchedCallState == state &&
+            lastDispatchedCallerName == callerName &&
+            _callInfo.value.callerNumber == callerNumber
+        ) {
+            return
         }
+        lastDispatchedCallState = state
+        lastDispatchedCallerName = callerName
+        _callInfo.value = ActiveCallInfo(
+            state = state,
+            callerName = callerName,
+            callerNumber = callerNumber,
+            missedCallCount = missedCount
+        )
+        DebugLogRepository.telephony(
+            "Call",
+            "State=$state caller=${callerName ?: "-"} num=${DebugLogRepository.maskPhoneNumber(callerNumber)} missed=$missedCount"
+        )
+        bleManager.updateCallState(
+            callState = state,
+            callerName = callerName,
+            callerNumber = callerNumber,
+            missedCallCount = missedCount
+        )
     }
 
     fun acceptIncomingCall() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                telecomManager?.acceptRingingCall()
-                Log.i(TAG, "Call accepted via TelecomManager")
-                bleManager.acknowledgeCallAction(accept = true)
-            }
+            telecomManager?.acceptRingingCall()
+            Log.i(TAG, "Call accepted via TelecomManager")
+            bleManager.acknowledgeCallAction(accept = true)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to accept call: ${e.message}")
         }
@@ -241,6 +311,9 @@ class CallManager private constructor(private val context: Context) {
     fun rejectIncomingCall() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                synchronized(stateLock) {
+                    wasRejectedByUser = true
+                }
                 telecomManager?.endCall()
                 Log.i(TAG, "Call rejected/ended via TelecomManager")
                 bleManager.acknowledgeCallAction(reject = true)
@@ -250,29 +323,109 @@ class CallManager private constructor(private val context: Context) {
         }
     }
 
+    fun rejectIncomingCallWithSms() {
+        val callerNumber = synchronized(stateLock) {
+            wasRejectedByUser = true
+            lastIncomingNumber ?: _callInfo.value.callerNumber
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                telecomManager?.endCall()
+                Log.i(TAG, "Call rejected with SMS intent via TelecomManager")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed ending call before reject SMS: ${e.message}")
+        }
+        val smsSent = ClusterPhonebookManager.getInstance(context).sendRejectSms(callerNumber)
+        if (callerNumber.isNullOrBlank()) {
+            DebugLogRepository.error("SMS", "Reject+SMS skipped: caller number unavailable (grant Call Log/Contacts)")
+        } else {
+            DebugLogRepository.telephony("Call", "Reject+SMS action (smsSent=$smsSent)")
+        }
+        bleManager.acknowledgeCallAction(reject = true, rejectSms = smsSent)
+    }
+
+    fun notifyOutgoingDialFromCluster(displayName: String, rawNumber: String) {
+        synchronized(stateLock) {
+            wasRinging = false
+            wasRejectedByUser = false
+            outgoingDialStartedAtMs = android.os.SystemClock.elapsedRealtime()
+            lastIncomingName = displayName
+            lastIncomingNumber = rawNumber
+            incomingCallGeneration++
+            dispatchCallUpdateLocked(CallState.OUTGOING_CALL, displayName, rawNumber)
+        }
+        // Clear synthetic OUTGOING_CALL state if dialer doesn't reach OFFHOOK within 6s
+        mainHandler.postDelayed({
+            synchronized(stateLock) {
+                if (_callInfo.value.state == CallState.OUTGOING_CALL &&
+                    (android.os.SystemClock.elapsedRealtime() - outgoingDialStartedAtMs) >= 5_500L
+                ) {
+                    outgoingDialStartedAtMs = 0L
+                    lastIncomingName = null
+                    lastIncomingNumber = null
+                    dispatchCallUpdateLocked(CallState.NO_CALL, null, null)
+                }
+            }
+        }, 6_000L)
+    }
+
+    fun pushLatestMissedCallToCluster() {
+        val existingMissed = synchronized(stateLock) {
+            if (missedCount > 0 && !lastIncomingNumber.isNullOrBlank()) {
+                Triple(lastIncomingName ?: "Missed Call", lastIncomingNumber ?: "", missedCount)
+            } else null
+        }
+        if (existingMissed != null) {
+            bleManager.sendMissedCall(existingMissed.first, existingMissed.second, existingMissed.third)
+            return
+        }
+        lookupExecutor.execute {
+            val latestMissed = ClusterPhonebookManager.getInstance(context).getLatestMissedCall()
+            if (latestMissed != null) {
+                val count = synchronized(stateLock) {
+                    if (missedCount <= 0) missedCount = 1
+                    missedCount
+                }
+                bleManager.sendMissedCall(latestMissed.name, latestMissed.number, count)
+            }
+        }
+    }
+
     fun simulateIncomingCall(name: String = "Dad (Mobile)", number: String = "+91 98765 43210") {
-        wasRinging = true
-        lastIncomingName = name
-        lastIncomingNumber = number
-        _callInfo.value = ActiveCallInfo(CallState.INCOMING_CALL, name, number, missedCount)
-        bleManager.updateCallState(CallState.INCOMING_CALL, name, number)
+        synchronized(stateLock) {
+            wasRinging = true
+            lastIncomingName = name
+            lastIncomingNumber = number
+            incomingCallGeneration++
+            dispatchCallUpdateLocked(CallState.INCOMING_CALL, name, number)
+        }
     }
 
     fun simulateEndCall() {
-        wasRinging = false
-        lastIncomingName = null
-        lastIncomingNumber = null
-        _callInfo.value = ActiveCallInfo(CallState.NO_CALL, null, null, missedCount)
-        bleManager.updateCallState(CallState.NO_CALL, null, null, missedCallCount = missedCount)
+        synchronized(stateLock) {
+            wasRinging = false
+            lastIncomingName = null
+            lastIncomingNumber = null
+            incomingCallGeneration++
+            dispatchCallUpdateLocked(CallState.NO_CALL, null, null)
+        }
     }
 
     fun simulateMissedCall(name: String = "Mom", number: String = "+91 98765 12345") {
-        missedCount++
-        _callInfo.value = ActiveCallInfo(CallState.NO_CALL, null, null, missedCount)
-        bleManager.sendMissedCall(name, number, missedCount)
+        synchronized(stateLock) {
+            missedCount++
+            lastDispatchedCallState = CallState.NO_CALL
+            lastDispatchedCallerName = null
+            _callInfo.value = ActiveCallInfo(CallState.NO_CALL, null, null, missedCount)
+            bleManager.sendMissedCall(name, number, missedCount)
+        }
     }
 
     private fun resolveContactName(phoneNumber: String): String {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return phoneNumber
+        }
         try {
             val uri = Uri.withAppendedPath(
                 ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
@@ -289,7 +442,7 @@ class CallManager private constructor(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error looking up contact name for $phoneNumber: ${e.message}")
+            Log.w(TAG, "Error looking up contact name for ${com.pulsarnav.app.debug.DebugLogRepository.maskPhoneNumber(phoneNumber)}: ${e.message}")
         }
         return phoneNumber
     }

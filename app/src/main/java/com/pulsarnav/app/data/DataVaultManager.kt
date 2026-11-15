@@ -15,6 +15,7 @@ import com.pulsarnav.app.location.ParkingManager
 import com.pulsarnav.app.maintenance.FuelEntry
 import com.pulsarnav.app.maintenance.FuelLogManager
 import com.pulsarnav.app.maintenance.MaintenanceManager
+import com.pulsarnav.app.maintenance.MaintenanceMath
 import com.pulsarnav.app.maintenance.ServiceRecord
 import com.pulsarnav.app.tracking.RideTracker
 import com.pulsarnav.app.tracking.Trip
@@ -37,12 +38,93 @@ data class VaultImportSummary(
     val totalOdometerKm: Double
 )
 
+class VaultPassphraseRequiredException(
+    message: String = "This .pnav backup is encrypted. Enter your passphrase to decrypt."
+) : Exception(message)
+
+internal object QrMigrationCodec {
+    const val QR_MAGIC_HEADER = "PNAV_SETUP"
+    const val QR_ENCRYPTED_HEADER = "PNAV_SETUP_ENC"
+
+    private val SENSITIVE_KEYS = setOf("r", "p", "bg", "in", "ip", "mn", "mac", "reg", "ha", "wa")
+
+    fun buildPayload(
+        settingsObj: JSONObject,
+        includeSensitiveProfile: Boolean = false,
+        passphrase: String? = null
+    ): String {
+        if (passphrase != null && passphrase.isBlank()) {
+            throw IllegalArgumentException("Passphrase cannot be blank.")
+        }
+        val includePii = includeSensitiveProfile || !passphrase.isNullOrBlank()
+        val obj = JSONObject().apply {
+            put("m", QR_MAGIC_HEADER)
+            val keys = settingsObj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (includePii || key !in SENSITIVE_KEYS) {
+                    put(key, settingsObj.get(key))
+                }
+            }
+        }
+        val plain = obj.toString()
+        if (!passphrase.isNullOrBlank()) {
+            return JSONObject().apply {
+                put("m", QR_ENCRYPTED_HEADER)
+                put("payload", VaultCrypto.encrypt(plain, passphrase))
+            }.toString()
+        }
+        return plain
+    }
+
+    fun decodePayload(payload: String, passphrase: String? = null): Result<JSONObject> {
+        return try {
+            val outer = JSONObject(payload)
+            when (outer.optString("m")) {
+                QR_MAGIC_HEADER -> Result.success(outer)
+                QR_ENCRYPTED_HEADER -> {
+                    val encryptedJson = outer.optString("payload", "")
+                    if (encryptedJson.isBlank() || !VaultCrypto.isEncryptedPayload(encryptedJson)) {
+                        return Result.failure(IllegalArgumentException("Malformed encrypted PulsarNav QR code."))
+                    }
+                    if (passphrase.isNullOrBlank()) {
+                        return Result.failure(
+                            VaultPassphraseRequiredException("This setup QR is encrypted. Enter the passphrase to unlock.")
+                        )
+                    }
+                    val decrypted = VaultCrypto.decrypt(encryptedJson, passphrase).getOrElse { err ->
+                        return Result.failure(err)
+                    }
+                    val inner = JSONObject(decrypted)
+                    if (inner.optString("m") != QR_MAGIC_HEADER) {
+                        return Result.failure(IllegalArgumentException("Not a valid PulsarNav Migration QR code."))
+                    }
+                    Result.success(inner)
+                }
+                else -> Result.failure(IllegalArgumentException("Not a valid PulsarNav Migration QR code."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+
 class DataVaultManager private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "DataVaultManager"
-        const val VAULT_SCHEMA_VERSION = 1
-        const val QR_MAGIC_HEADER = "PNAV_SETUP"
+        const val VAULT_SCHEMA_VERSION = 2
+        const val QR_MAGIC_HEADER = QrMigrationCodec.QR_MAGIC_HEADER
+        const val QR_ENCRYPTED_HEADER = QrMigrationCodec.QR_ENCRYPTED_HEADER
+        const val DEFAULT_EXPORT_CACHE_MAX_AGE_MS = 10L * 60L * 1000L
+        @Suppress("DEPRECATION")
+        private val EXCLUDED_SETTINGS_KEYS = setOf(
+            AppSettings.KEY_DOC_RC_PATH,
+            AppSettings.KEY_DOC_INSURANCE_PATH,
+            AppSettings.KEY_DOC_PUC_PATH,
+            AppSettings.KEY_LAST_ACTIVE_TAB,
+            AppSettings.KEY_ACTIVE_TAB_KEY
+        )
 
         @Volatile
         private var instance: DataVaultManager? = null
@@ -79,10 +161,10 @@ class DataVaultManager private constructor(private val context: Context) {
         }
         root.put("header", header)
 
-        // 1. AppSettings
+        // 1. AppSettings (exclude device-local filesystem paths)
         val settingsObj = JSONObject()
         for ((key, value) in settings.getAllSettingsMap()) {
-            if (value != null) {
+            if (value != null && key !in EXCLUDED_SETTINGS_KEYS) {
                 settingsObj.put(key, value)
             }
         }
@@ -97,6 +179,7 @@ class DataVaultManager private constructor(private val context: Context) {
                 put("odometerKm", f.odometerKm)
                 put("liters", f.liters)
                 put("totalCostInr", f.totalCostInr)
+                put("isFullTank", f.isFullTank)
                 if (f.calculatedKmpl != null) put("calculatedKmpl", f.calculatedKmpl)
             }
             fuelArray.put(fObj)
@@ -167,14 +250,49 @@ class DataVaultManager private constructor(private val context: Context) {
     }
 
     /**
-     * Writes the vault to a timestamped file in cacheDir/vault/ and returns it.
+     * Deletes cached temporary export artifacts older than [maxAgeMs] from cacheDir/vault/.
      */
-    fun exportVaultToFile(): File {
+    fun pruneExportCache(maxAgeMs: Long = DEFAULT_EXPORT_CACHE_MAX_AGE_MS) {
+        val vaultDir = File(context.cacheDir, "vault")
+        if (!vaultDir.exists()) return
+        val cutoff = System.currentTimeMillis() - maxAgeMs
+        vaultDir.listFiles()?.forEach { oldFile ->
+            if (oldFile.isFile && (maxAgeMs <= 0L || oldFile.lastModified() <= cutoff)) {
+                oldFile.delete()
+            }
+        }
+    }
+
+    /**
+     * Clears all temporary export files from cacheDir/vault/.
+     */
+    fun clearExportCache() {
+        pruneExportCache(maxAgeMs = 0L)
+    }
+
+    /**
+     * Writes the vault to a timestamped `.pnav` (AES-256-GCM encrypted when [passphrase] is supplied)
+     * or `.pnav.json` file in cacheDir/vault/ when [allowUnencrypted] is explicitly true.
+     */
+    fun exportVaultToFile(passphrase: String? = null, allowUnencrypted: Boolean = false): File {
+        if (passphrase != null && passphrase.isBlank()) {
+            throw IllegalArgumentException("Passphrase cannot be blank.")
+        }
+        val encrypted = !passphrase.isNullOrBlank()
+        if (!encrypted && !allowUnencrypted) {
+            throw IllegalArgumentException(
+                "Refusing unencrypted vault export without explicit confirmation. Enter a passphrase or allow plaintext export."
+            )
+        }
         val vaultDir = File(context.cacheDir, "vault").apply { mkdirs() }
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val file = File(vaultDir, "pulsarnav_vault_$timeStamp.pnav.json")
+        clearExportCache()
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val json = exportVaultJson()
+        val payload = if (encrypted) VaultCrypto.encrypt(json, passphrase!!) else json
+        val ext = if (encrypted) "pnav" else "pnav.json"
+        val file = File(vaultDir, "pulsarnav_vault_$timeStamp.$ext")
         FileOutputStream(file).use { out ->
-            out.write(exportVaultJson().toByteArray(Charsets.UTF_8))
+            out.write(payload.toByteArray(Charsets.UTF_8))
         }
         return file
     }
@@ -188,13 +306,18 @@ class DataVaultManager private constructor(private val context: Context) {
             "${context.packageName}.fileprovider",
             file
         )
+        val mime = if (file.name.endsWith(".pnav", ignoreCase = true)) {
+            "application/octet-stream"
+        } else {
+            "application/json"
+        }
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/json"
+            type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, "PulsarNav Data Vault Backup")
             putExtra(
                 Intent.EXTRA_TEXT,
-                "PulsarNav Data Vault backup for ${settings.bikeName}. Open this file on your phone in PulsarNav to restore."
+                "PulsarNav Data Vault backup for ${settings.bikeName}. Open this file in PulsarNav to restore."
             )
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -206,7 +329,24 @@ class DataVaultManager private constructor(private val context: Context) {
     // =========================================================================
 
     /**
-     * Restores all data from a vault JSON string.
+     * Imports either an AES-256-GCM encrypted `.pnav` backup (using `passphrase`)
+     * or a legacy plaintext `.pnav.json` backup.
+     */
+    fun importVaultFromInput(rawContent: String, passphrase: String? = null): Result<VaultImportSummary> {
+        if (VaultCrypto.isEncryptedPayload(rawContent)) {
+            if (passphrase.isNullOrBlank()) {
+                return Result.failure(VaultPassphraseRequiredException())
+            }
+            val decrypted = VaultCrypto.decrypt(rawContent, passphrase).getOrElse { err ->
+                return Result.failure(err)
+            }
+            return importVaultFromJson(decrypted)
+        }
+        return importVaultFromJson(rawContent)
+    }
+
+    /**
+     * Restores all data from a plaintext vault JSON string.
      */
     fun importVaultFromJson(jsonString: String): Result<VaultImportSummary> {
         return try {
@@ -229,7 +369,9 @@ class DataVaultManager private constructor(private val context: Context) {
                 val keys = settingsObj.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    map[k] = settingsObj.get(k)
+                    if (k !in EXCLUDED_SETTINGS_KEYS) {
+                        map[k] = settingsObj.get(k)
+                    }
                 }
                 settings.restoreSettingsMap(map)
             }
@@ -248,7 +390,8 @@ class DataVaultManager private constructor(private val context: Context) {
                             odometerKm = o.optDouble("odometerKm", 0.0),
                             liters = o.optDouble("liters", 0.0),
                             totalCostInr = o.optDouble("totalCostInr", 0.0),
-                            calculatedKmpl = if (o.has("calculatedKmpl") && !o.isNull("calculatedKmpl")) o.optDouble("calculatedKmpl") else null
+                            calculatedKmpl = if (o.has("calculatedKmpl") && !o.isNull("calculatedKmpl")) o.optDouble("calculatedKmpl") else null,
+                            isFullTank = o.optBoolean("isFullTank", true)
                         )
                     )
                 }
@@ -339,8 +482,15 @@ class DataVaultManager private constructor(private val context: Context) {
                     maintenanceManager.setLastServiceKm(lastServ)
                 }
                 val targetOdo = maintObj.optDouble("nextServiceTargetOdoKm", -1.0)
-                if (targetOdo > 0.0) {
-                    maintenanceManager.setNextServiceTargetOdo(targetOdo)
+                val resolvedTarget = when {
+                    targetOdo <= 0.0 -> -1.0
+                    // Legacy builds could export fallback 500.0 when KEY_NEXT_SERVICE_TARGET_ODO was unset
+                    targetOdo == 500.0 && totalOdo > 750.0 && lastServ >= 500.0 ->
+                        MaintenanceMath.defaultServiceTargetOdo(totalOdo)
+                    else -> targetOdo
+                }
+                if (resolvedTarget > 0.0) {
+                    maintenanceManager.setNextServiceTargetOdo(resolvedTarget)
                 }
             }
 
@@ -355,6 +505,7 @@ class DataVaultManager private constructor(private val context: Context) {
                 )
             }
 
+            settings.isSetupCompleted = true
             val displayRiderName = settings.riderName.ifBlank { settings.bikeName.ifBlank { "Active Rider" } }
             Result.success(
                 VaultImportSummary(
@@ -376,11 +527,15 @@ class DataVaultManager private constructor(private val context: Context) {
     // =========================================================================
 
     /**
-     * Generates a compact payload representing essential setup credentials.
+     * Generates a compact migration QR payload. By default, sensitive personal/medical/contact
+     * fields are omitted from unencrypted QR payloads unless [passphrase] is supplied or
+     * [includeSensitiveProfile] is explicitly enabled.
      */
-    fun createSetupQrPayload(): String {
-        val obj = JSONObject().apply {
-            put("m", QR_MAGIC_HEADER)
+    fun createSetupQrPayload(
+        includeSensitiveProfile: Boolean = false,
+        passphrase: String? = null
+    ): String {
+        val rawObj = JSONObject().apply {
             put("r", settings.riderName)
             put("p", settings.riderPhone)
             put("bg", settings.riderBloodGroup)
@@ -398,17 +553,27 @@ class DataVaultManager private constructor(private val context: Context) {
             put("cc", settings.selectedCountryCode)
             put("fpr", settings.petrolPricePerLiter)
             put("dm", settings.isDarkMode)
+            put("ac", settings.isAutoConnectEnabled)
             put("odo", maintenanceManager.status.value.totalOdometerKm)
             put("dte", settings.projectedDteKm)
         }
-        return obj.toString()
+        return QrMigrationCodec.buildPayload(
+            settingsObj = rawObj,
+            includeSensitiveProfile = includeSensitiveProfile,
+            passphrase = passphrase
+        )
     }
 
     /**
      * Renders an obsidian/wine-red styled QR Code Bitmap from the setup payload.
      */
-    fun generateSetupQrBitmap(width: Int = 600, height: Int = 600): Bitmap {
-        val payload = createSetupQrPayload()
+    fun generateSetupQrBitmap(
+        width: Int = 600,
+        height: Int = 600,
+        includeSensitiveProfile: Boolean = false,
+        passphrase: String? = null
+    ): Bitmap {
+        val payload = createSetupQrPayload(includeSensitiveProfile, passphrase)
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
             put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M)
             put(EncodeHintType.MARGIN, 2)
@@ -421,42 +586,54 @@ class DataVaultManager private constructor(private val context: Context) {
         // Obsidian card background (#1C1B20) with crisp white QR modules (#F8FAFC)
         val colorDark = Color.parseColor("#F8FAFC")
         val colorLight = Color.parseColor("#1C1B20")
-
-        for (x in 0 until width) {
-            for (y in 0 until height) {
-                bitmap.setPixel(x, y, if (matrix.get(x, y)) colorDark else colorLight)
+        val pixels = IntArray(width * height)
+        for (y in 0 until height) {
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                pixels[rowOffset + x] = if (matrix.get(x, y)) colorDark else colorLight
             }
         }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         return bitmap
     }
 
     /**
-     * Parses and restores from a scanned QR Code payload.
+     * Parses and restores from a scanned QR Code payload (`PNAV_SETUP` or encrypted `PNAV_SETUP_ENC`).
      */
-    fun importFromQrPayload(payload: String): Result<String> {
+    fun importFromQrPayload(payload: String, passphrase: String? = null): Result<String> {
         return try {
-            val obj = JSONObject(payload)
-            if (obj.optString("m") != QR_MAGIC_HEADER) {
-                return Result.failure(IllegalArgumentException("Not a valid PulsarNav Migration QR code."))
+            val obj = QrMigrationCodec.decodePayload(payload, passphrase).getOrElse { err ->
+                return Result.failure(err)
             }
 
-            if (obj.has("r")) settings.riderName = obj.getString("r")
-            if (obj.has("p")) settings.riderPhone = obj.getString("p")
-            if (obj.has("bg")) settings.riderBloodGroup = obj.getString("bg")
-            if (obj.has("in")) settings.emergencyContactName = obj.getString("in")
-            if (obj.has("ip")) settings.emergencyContactPhone = obj.getString("ip")
-            if (obj.has("mn")) settings.medicalNotes = obj.getString("mn")
-            if (obj.has("bn")) settings.bikeName = obj.getString("bn")
-            if (obj.has("mac")) settings.lastConnectedBikeMac = obj.getString("mac")
-            if (obj.has("reg")) settings.bikeRegNumber = obj.getString("reg")
-            if (obj.has("th")) settings.appTheme = obj.getString("th")
-            if (obj.has("ha")) settings.homeAddress = obj.getString("ha")
-            if (obj.has("wa")) settings.workAddress = obj.getString("wa")
-            if (obj.has("pnav")) settings.preferredNavApp = obj.getString("pnav")
-            if (obj.has("mid")) settings.selectedModelId = obj.getString("mid")
-            if (obj.has("cc")) settings.selectedCountryCode = obj.getString("cc")
-            if (obj.has("fpr")) settings.petrolPricePerLiter = obj.getDouble("fpr")
-            if (obj.has("dm")) settings.isDarkMode = obj.getBoolean("dm")
+            fun JSONObject.optNonNullString(key: String): String? =
+                if (has(key) && !isNull(key)) getString(key) else null
+
+            val mid = obj.optNonNullString("mid")
+            val cc = obj.optNonNullString("cc")
+            if (mid != null && cc != null) {
+                settings.applyBikeAndCountrySelection(mid, cc)
+            } else {
+                if (mid != null) settings.selectedModelId = mid
+                if (cc != null) settings.selectedCountryCode = cc
+            }
+
+            obj.optNonNullString("r")?.let { settings.riderName = it }
+            obj.optNonNullString("p")?.let { settings.riderPhone = it }
+            obj.optNonNullString("bg")?.let { settings.riderBloodGroup = it }
+            obj.optNonNullString("in")?.let { settings.emergencyContactName = it }
+            obj.optNonNullString("ip")?.let { settings.emergencyContactPhone = it }
+            obj.optNonNullString("mn")?.let { settings.medicalNotes = it }
+            obj.optNonNullString("bn")?.let { settings.bikeName = it }
+            obj.optNonNullString("mac")?.let { settings.lastConnectedBikeMac = it }
+            obj.optNonNullString("reg")?.let { settings.bikeRegNumber = it }
+            obj.optNonNullString("th")?.let { settings.appTheme = it }
+            obj.optNonNullString("ha")?.let { settings.homeAddress = it }
+            obj.optNonNullString("wa")?.let { settings.workAddress = it }
+            obj.optNonNullString("pnav")?.let { settings.preferredNavApp = it }
+            if (obj.has("fpr") && !obj.isNull("fpr")) settings.petrolPricePerLiter = obj.getDouble("fpr")
+            if (obj.has("dm") && !obj.isNull("dm")) settings.isDarkMode = obj.getBoolean("dm")
+            if (obj.has("ac") && !obj.isNull("ac")) settings.isAutoConnectEnabled = obj.getBoolean("ac")
 
             val odo = obj.optDouble("odo", -1.0)
             if (odo > 0) maintenanceManager.setOdometer(odo)
@@ -464,7 +641,10 @@ class DataVaultManager private constructor(private val context: Context) {
             val dte = obj.optInt("dte", -1)
             if (dte > 0) settings.projectedDteKm = dte
 
-            Result.success("Profile restored for ${settings.riderName} (${settings.bikeName})")
+            settings.isSetupCompleted = true
+            val displayTarget = settings.riderName.ifBlank { settings.bikeName.ifBlank { "Bike Profile" } }
+            val scopeNote = if (obj.has("r") || obj.has("in")) "Profile" else "Bike & app settings"
+            Result.success("$scopeNote restored for $displayTarget (${settings.bikeName})")
         } catch (e: Exception) {
             Result.failure(e)
         }
