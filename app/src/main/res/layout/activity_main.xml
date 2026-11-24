@@ -72,53 +72,56 @@
                     <TextView
                         android:id="@+id/chipBtWarning"
                         android:layout_width="wrap_content"
-                        android:layout_height="22dp"
-                        android:layout_marginEnd="4dp"
+                        android:layout_height="28dp"
+                        android:minHeight="44dp"
+                        android:layout_marginEnd="6dp"
                         android:background="@drawable/pill_badge"
                         android:clickable="true"
                         android:focusable="true"
                         android:foreground="?attr/selectableItemBackground"
                         android:gravity="center"
-                        android:paddingHorizontal="7dp"
+                        android:paddingHorizontal="10dp"
                         android:singleLine="true"
                         android:text="BT OFF"
                         android:textColor="@color/amber_accent"
-                        android:textSize="9sp"
+                        android:textSize="10sp"
                         android:textStyle="bold"
                         android:visibility="gone" />
 
                     <TextView
                         android:id="@+id/chipGpsWarning"
                         android:layout_width="wrap_content"
-                        android:layout_height="22dp"
+                        android:layout_height="28dp"
+                        android:minHeight="44dp"
                         android:background="@drawable/pill_badge"
                         android:clickable="true"
                         android:focusable="true"
                         android:foreground="?attr/selectableItemBackground"
                         android:gravity="center"
-                        android:paddingHorizontal="7dp"
+                        android:paddingHorizontal="10dp"
                         android:singleLine="true"
                         android:text="GPS OFF"
                         android:textColor="@color/amber_accent"
-                        android:textSize="9sp"
+                        android:textSize="10sp"
                         android:textStyle="bold"
                         android:visibility="gone" />
 
                     <TextView
                         android:id="@+id/chipPermWarning"
                         android:layout_width="wrap_content"
-                        android:layout_height="22dp"
-                        android:layout_marginStart="4dp"
+                        android:layout_height="28dp"
+                        android:minHeight="44dp"
+                        android:layout_marginStart="6dp"
                         android:background="@drawable/pill_badge"
                         android:clickable="true"
                         android:focusable="true"
                         android:foreground="?attr/selectableItemBackground"
                         android:gravity="center"
-                        android:paddingHorizontal="7dp"
+                        android:paddingHorizontal="10dp"
                         android:singleLine="true"
                         android:text="PERMS"
                         android:textColor="@color/amber_accent"
-                        android:textSize="9sp"
+                        android:textSize="10sp"
                         android:textStyle="bold"
                         android:visibility="gone" />
                 </LinearLayout>
@@ -129,16 +132,17 @@
             android:id="@+id/btnTopSos"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="44dp"
+            android:minHeight="44dp"
             android:backgroundTint="@color/wine_red_subtle"
             android:letterSpacing="0.04"
-            android:paddingHorizontal="14dp"
+            android:paddingHorizontal="16dp"
             android:paddingVertical="0dp"
             android:text="SOS"
             android:textColor="@color/wine_red_light"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold"
-            app:cornerRadius="18dp"
+            app:cornerRadius="22dp"
             app:strokeColor="@color/wine_red_border"
             app:strokeWidth="1dp" />
     </LinearLayout>
@@ -408,10 +412,11 @@
                             app:trackCornerRadius="4dp" />
 
                         <TextView
+                            android:id="@+id/tvTankReserveNote"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="Reserve triggers below 2.4L (~90 km range)"
+                            android:text="Reserve triggers below 2.4L"
                             android:textColor="@color/text_tertiary"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -502,6 +507,137 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
+                <!-- TFT Full-Screen Wi-Fi Mirroring Card (NS400Z / Bajaj TFT Clusters) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardTftWifiMirror"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
+                    app:cardBackgroundColor="@color/surface_card"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/surface_border"
+                    app:strokeWidth="@dimen/card_stroke_width">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="@dimen/card_padding">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <View
+                                android:id="@+id/viewTftWifiDot"
+                                android:layout_width="12dp"
+                                android:layout_height="12dp"
+                                android:background="@drawable/circle_dot"
+                                android:backgroundTint="@color/status_disconnected" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="TFT Full-Screen Wi-Fi Mirror"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvTftWifiStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Idle • 800×480 TCP 5558 / UDP 5556"
+                                    android:textColor="@color/text_tertiary"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnConfigureTftWifi"
+                                android:layout_width="wrap_content"
+                                android:layout_height="@dimen/btn_height_compact"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:paddingHorizontal="12dp"
+                                android:paddingVertical="0dp"
+                                android:text="Config"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="@dimen/btn_corner_radius_compact"
+                                app:strokeColor="@color/surface_border"
+                                app:strokeWidth="1dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/progressTftHandshake"
+                            android:layout_width="match_parent"
+                            android:layout_height="3dp"
+                            android:layout_marginTop="8dp"
+                            android:indeterminate="true"
+                            android:visibility="gone"
+                            app:indicatorColor="@color/amber_accent"
+                            app:trackColor="@color/surface_border"
+                            app:trackCornerRadius="2dp" />
+
+                        <TextView
+                            android:id="@+id/tvTftWifiMeta"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Stream maps-only 800×480 Live Map (works locked) or Cast Google Maps."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnToggleTftHudMirror"
+                                android:layout_width="0dp"
+                                android:layout_height="@dimen/btn_height_secondary"
+                                android:layout_marginEnd="6dp"
+                                android:layout_weight="1"
+                                android:backgroundTint="@color/wine_red"
+                                android:text="HUD Mirror\n(Screen Off)"
+                                android:lines="2"
+                                android:textColor="@color/on_primary"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="@dimen/btn_corner_radius" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnCastLiveScreen"
+                                android:layout_width="0dp"
+                                android:layout_height="@dimen/btn_height_secondary"
+                                android:layout_marginStart="6dp"
+                                android:layout_weight="1"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:text="Cast Maps\n(Google Maps)"
+                                android:lines="2"
+                                android:textColor="@color/text_primary"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="@dimen/btn_corner_radius"
+                                app:strokeColor="@color/surface_border"
+                                app:strokeWidth="1dp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <!-- Notification Access Warning Banner (Visible only when Notification Access is Missing) -->
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardNotificationPermissionBanner"
@@ -552,7 +688,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
-                                    android:text="PulsarNav needs Android Notification Access to mirror Google Maps, Waze &amp; Android Auto navigation arrows onto your NS200 cluster."
+                                    android:text="PulsarNav needs Android Notification Access to mirror Google Maps, Waze &amp; Android Auto navigation arrows onto your bike cluster."
                                     android:textColor="@color/text_secondary"
                                     android:textSize="12sp" />
                             </LinearLayout>
@@ -569,6 +705,116 @@
                             android:textSize="13sp"
                             android:textStyle="bold"
                             app:cornerRadius="@dimen/btn_corner_radius" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Active TFT Live Navigation Dashboard Card (Shown when route is running) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardActiveTftNavigation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="@color/surface_card"
+                    app:cardCornerRadius="@dimen/card_corner_radius"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/wine_red"
+                    app:strokeWidth="1.5dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <ImageView
+                                android:id="@+id/ivActiveNavIcon"
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:background="@drawable/circle_dot"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:padding="8dp"
+                                android:src="@drawable/ic_navigation"
+                                app:tint="@color/wine_red_light" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tvActiveNavNextTurn"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Navigation Active"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvActiveNavTripSummary"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Calculating distance &amp; ETA..."
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/tvActiveNavStatusBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/pill_badge"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:paddingHorizontal="8dp"
+                                android:paddingVertical="4dp"
+                                android:text="TFT LIVE"
+                                android:textColor="@color/wine_red_light"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:gravity="end"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnActiveNavReroute"
+                                style="@style/Widget.MaterialComponents.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:text="Reroute"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnActiveNavStop"
+                                style="@style/Widget.MaterialComponents.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginStart="8dp"
+                                android:text="Stop Route"
+                                android:textColor="@color/wine_red_light"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1573,7 +1819,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="NS200 recommended maintenance cycle: 5,000 km or 120 days"
+                            android:text="Recommended maintenance cycle: 5,000 km or 120 days"
                             android:textColor="@color/text_tertiary"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -2092,7 +2338,7 @@
                                     android:id="@+id/tvBikeName"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Pulsar NS200"
+                                    android:text="Bajaj Cluster"
                                     android:textColor="@color/text_primary"
                                     android:textSize="15sp"
                                     android:textStyle="bold" />
@@ -2182,9 +2428,14 @@
                                     android:id="@+id/btnEditOdo"
                                     style="@style/Widget.Material3.Button.TonalButton"
                                     android:layout_width="wrap_content"
-                                    android:layout_height="32dp"
+                                    android:layout_height="36dp"
                                     android:backgroundTint="@color/surface_elevated"
+                                    android:insetTop="0dp"
+                                    android:insetBottom="0dp"
                                     android:letterSpacing="0.02"
+                                    android:maxLines="1"
+                                    android:minHeight="0dp"
+                                    android:minWidth="0dp"
                                     android:paddingHorizontal="12dp"
                                     android:paddingVertical="0dp"
                                     android:text="Edit ODO"
@@ -2220,12 +2471,6 @@
                     app:cardElevation="0dp"
                     app:strokeColor="@color/surface_border"
                     app:strokeWidth="@dimen/card_stroke_width">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical">
-
 
                         <!-- Digital Glovebox Documents -->
                         <LinearLayout
@@ -2281,7 +2526,6 @@
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
-                    </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
                 <!-- Data Vault & Migration Card -->
@@ -2583,12 +2827,14 @@
                                 android:padding="8dp">
 
                                 <View
+                                    android:id="@+id/viewThemeAmoledDot"
                                     android:layout_width="22dp"
                                     android:layout_height="22dp"
-                                    android:background="@drawable/pill_badge"
+                                    android:background="@drawable/circle_dot"
                                     android:backgroundTint="#000000" />
 
                                 <TextView
+                                    android:id="@+id/tvThemeAmoledTitle"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="6dp"
@@ -2721,6 +2967,7 @@
                             android:id="@+id/cardThemeBlue"
                             android:layout_width="124dp"
                             android:layout_height="84dp"
+                            android:layout_marginEnd="8dp"
                             android:clickable="true"
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
@@ -2759,7 +3006,6 @@
                             android:id="@+id/cardThemeCustom"
                             android:layout_width="124dp"
                             android:layout_height="84dp"
-                            android:layout_marginEnd="8dp"
                             android:clickable="true"
                             android:focusable="true"
                             android:foreground="?attr/selectableItemBackground"
@@ -2853,7 +3099,7 @@
                                         android:hint="#9E1B32"
                                         android:imeOptions="actionDone"
                                         android:inputType="textCapCharacters|textNoSuggestions"
-                                        android:maxLength="9"
+                                        android:maxLength="7"
                                         android:selectAllOnFocus="true"
                                         android:paddingHorizontal="8dp"
                                         android:paddingVertical="0dp"
@@ -3322,7 +3568,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Two-Wheeler Navigation ( mode=l)"
+                                    android:text="Two-Wheeler Navigation (Motorcycle)"
                                     android:textColor="@color/text_primary"
                                     android:textSize="14sp"
                                     android:textStyle="bold" />
@@ -3535,6 +3781,150 @@
                                 android:id="@+id/switchSkipHeadunitNav"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginVertical="6dp"
+                            android:background="@color/surface_border_subtle" />
+
+                        <!-- Reject-with-SMS Auto-Reply Row -->
+                        <LinearLayout
+                            android:id="@+id/rowSmsReject"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="58dp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="8dp">
+
+                            <ImageView
+                                android:id="@+id/ivSmsRejectIcon"
+                                android:layout_width="38dp"
+                                android:layout_height="38dp"
+                                android:background="@drawable/circle_dot"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:padding="9dp"
+                                android:src="@drawable/ic_phone_rsa"
+                                app:tint="@color/wine_red_light" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
+                                android:layout_marginEnd="6dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Reject-with-SMS Auto-Reply"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvSmsRejectSummary"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="Reply: &quot;i will call later.&quot;"
+                                    android:textColor="@color/text_tertiary"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEditSmsRejectMsg"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="8dp"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:maxLines="1"
+                                android:minHeight="0dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="12dp"
+                                android:paddingVertical="0dp"
+                                android:text="Edit"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp"
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/switchSmsReject"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginVertical="6dp"
+                            android:background="@color/surface_border_subtle" />
+
+                        <!-- Phonebook, Call Log, Dialback & SMS Permissions Row -->
+                        <LinearLayout
+                            android:id="@+id/rowTelephonyPermissions"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="58dp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingHorizontal="4dp"
+                            android:paddingVertical="8dp">
+
+                            <ImageView
+                                android:id="@+id/ivTelephonyPermsIcon"
+                                android:layout_width="38dp"
+                                android:layout_height="38dp"
+                                android:background="@drawable/circle_dot"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:padding="9dp"
+                                android:src="@drawable/ic_phone_rsa"
+                                app:tint="@color/wine_red_light" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Call Log, Contacts, Dial &amp; SMS"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvTelephonyPermsStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Checking cluster telephony permissions..."
+                                    android:textColor="@color/amber_accent"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Grant ›"
+                                android:textColor="@color/text_tertiary"
+                                android:textSize="12sp" />
                         </LinearLayout>
 
                         <View
@@ -3808,8 +4198,13 @@
                                 android:id="@+id/btnConfigHome"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="@dimen/btn_height_compact"
+                                android:layout_height="36dp"
                                 android:backgroundTint="@color/surface_elevated"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:maxLines="1"
+                                android:minHeight="0dp"
+                                android:minWidth="0dp"
                                 android:paddingHorizontal="16dp"
                                 android:paddingVertical="0dp"
                                 android:text="Set"
@@ -3843,8 +4238,54 @@
                                 android:id="@+id/btnConfigWork"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
-                                android:layout_height="@dimen/btn_height_compact"
+                                android:layout_height="36dp"
                                 android:backgroundTint="@color/surface_elevated"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:maxLines="1"
+                                android:minHeight="0dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="16dp"
+                                android:paddingVertical="0dp"
+                                android:text="Set"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                app:cornerRadius="@dimen/btn_corner_radius_compact" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginVertical="6dp"
+                            android:background="@color/surface_border_subtle" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingVertical="4dp">
+
+                            <TextView
+                                android:id="@+id/tvSettingsFavPlace"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Favorite: Tap to configure"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnConfigFavPlace"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:backgroundTint="@color/surface_elevated"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:maxLines="1"
+                                android:minHeight="0dp"
+                                android:minWidth="0dp"
                                 android:paddingHorizontal="16dp"
                                 android:paddingVertical="0dp"
                                 android:text="Set"
@@ -3897,6 +4338,20 @@
                                 android:letterSpacing="0.06"
                                 android:text="CLUSTER HUD MIRROR"
                                 android:textColor="@color/text_tertiary"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvMapsTbtFixLink"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="8dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:paddingHorizontal="6dp"
+                                android:paddingVertical="4dp"
+                                android:text="Maps Fix ›"
+                                android:textColor="@color/wine_red_light"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
 
@@ -3979,6 +4434,19 @@
                             android:paddingVertical="6dp"
                             android:text="Last BLE Packet: None"
                             android:textColor="@color/text_tertiary"
+                            android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvPacketDecoded"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:background="@drawable/rounded_box"
+                            android:fontFamily="monospace"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="6dp"
+                            android:text="Decoded: Waiting for BLE frame..."
+                            android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -4146,6 +4614,18 @@
                             android:text="WhatsApp Alerts: Listening (SMS excluded)"
                             android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/tvClusterActionStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/rounded_box"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="6dp"
+                            android:text="Cluster Action: Waiting for switchgear / phonebook sync"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -4177,10 +4657,28 @@
                         android:layout_height="@dimen/btn_height_secondary"
                         android:layout_marginHorizontal="2dp"
                         android:layout_weight="1"
+                        android:paddingHorizontal="4dp"
                         android:backgroundTint="@color/surface_card"
                         android:text="WhatsApp"
                         android:textColor="@color/text_primary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="@dimen/btn_corner_radius"
+                        app:strokeColor="@color/surface_border"
+                        app:strokeWidth="@dimen/card_stroke_width" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSimulateSms"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/btn_height_secondary"
+                        android:layout_marginHorizontal="2dp"
+                        android:layout_weight="1"
+                        android:paddingHorizontal="4dp"
+                        android:backgroundTint="@color/surface_card"
+                        android:text="SMS"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         app:cornerRadius="@dimen/btn_corner_radius"
                         app:strokeColor="@color/surface_border"
@@ -4193,15 +4691,63 @@
                         android:layout_height="@dimen/btn_height_secondary"
                         android:layout_marginStart="4dp"
                         android:layout_weight="1"
+                        android:paddingHorizontal="4dp"
                         android:backgroundTint="@color/surface_card"
-                        android:text="End"
+                        android:text="Missed"
                         android:textColor="@color/text_primary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         app:cornerRadius="@dimen/btn_corner_radius"
                         app:strokeColor="@color/surface_border"
                         app:strokeWidth="@dimen/card_stroke_width" />
                 </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="@dimen/card_margin_bottom"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSyncPhonebookCalls"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/btn_height_secondary"
+                        android:layout_marginEnd="4dp"
+                        android:layout_weight="1"
+                        android:backgroundTint="@color/surface_card"
+                        android:text="Sync Favs &amp; Calls"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="@dimen/btn_corner_radius"
+                        app:strokeColor="@color/surface_border"
+                        app:strokeWidth="@dimen/card_stroke_width" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnGrantTelephonyPerms"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/btn_height_secondary"
+                        android:layout_marginStart="4dp"
+                        android:layout_weight="1"
+                        android:backgroundTint="@color/surface_card"
+                        android:text="Call / SMS Access"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="@dimen/btn_corner_radius"
+                        app:strokeColor="@color/surface_border"
+                        app:strokeWidth="@dimen/card_stroke_width" />
+                </LinearLayout>
+
+                <!-- Full 800x480 TFT Debugger & Protocol Log Console -->
+                <include
+                    android:id="@+id/labsTftDebug"
+                    layout="@layout/include_labs_tft_and_logs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
 
 
                 <!-- About & Legal Compliance -->
@@ -4293,7 +4839,8 @@
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
+        android:layout_height="wrap_content"
+        android:minHeight="72dp"
         android:layout_alignParentBottom="true"
         android:background="@color/surface"
         app:elevation="0dp"
