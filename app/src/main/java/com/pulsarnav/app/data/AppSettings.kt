@@ -61,6 +61,7 @@ class AppSettings(context: Context) {
         const val KEY_PROJECTED_DTE = "projected_dte_km"
         const val KEY_FUEL_PERCENT = "fuel_level_percent"
         const val KEY_FUEL_LITERS = "fuel_level_liters"
+        const val KEY_FUEL_SORT_ORDER = "fuel_log_sort_order"
         const val KEY_LAST_SYNC_MS = "last_synced_timestamp_ms"
 
         const val KEY_RIDER_BLOOD_GROUP = "rider_blood_group"
@@ -188,7 +189,8 @@ class AppSettings(context: Context) {
                     if (path.isNotBlank() && fileExists(path)) RestoreAction.PutString(path) else RestoreAction.Remove
                 }
                 KEY_HOME_LAT, KEY_HOME_LNG, KEY_WORK_LAT, KEY_WORK_LNG,
-                KEY_FAV_PLACE_LAT, KEY_FAV_PLACE_LNG, KEY_SMS_REJECT_MESSAGE ->
+                KEY_FAV_PLACE_LAT, KEY_FAV_PLACE_LNG, KEY_SMS_REJECT_MESSAGE,
+                KEY_FUEL_SORT_ORDER ->
                     RestoreAction.PutString(value.toString())
                 KEY_AUTO_PARK, KEY_RIDE_TRACKING, KEY_MEDIA_CONTROL, KEY_WHATSAPP_ALERTS,
                 KEY_MAINTENANCE_ALERTS, KEY_TELEMETRY_SYNC, KEY_TWO_WHEELER_MODE, KEY_AUTO_CONNECT,
@@ -720,6 +722,12 @@ class AppSettings(context: Context) {
             prefs.edit().putString(KEY_FAV_PLACE_ADDRESS, value.trim()).apply()
         }
 
+    var fuelSortOrder: String
+        get() = getSafeString(KEY_FUEL_SORT_ORDER, "date_desc")
+        set(value) {
+            prefs.edit().putString(KEY_FUEL_SORT_ORDER, value).apply()
+        }
+
     var homeLat: Double
         get() = getSafeString(KEY_HOME_LAT, "0.0").toDoubleOrNull() ?: 0.0
         set(value) { prefs.edit().putString(KEY_HOME_LAT, value.toString()).apply() }
@@ -814,6 +822,21 @@ class AppSettings(context: Context) {
             current[idx] = item.copy(isResolved = !item.isResolved)
             saveBikeIssues(current)
         }
+    }
+
+    fun updateBikeIssue(id: String, title: String, category: String? = null): Boolean {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return false
+        val current = getBikeIssues()
+        val idx = current.indexOfFirst { it.id == id }
+        if (idx == -1) return false
+        val item = current[idx]
+        current[idx] = item.copy(
+            title = cleanTitle,
+            category = category?.trim()?.takeIf { it.isNotEmpty() } ?: item.category
+        )
+        saveBikeIssues(current)
+        return true
     }
 
     fun deleteBikeIssue(id: String) {

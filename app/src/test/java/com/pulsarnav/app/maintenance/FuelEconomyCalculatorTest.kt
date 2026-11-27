@@ -79,4 +79,19 @@ class FuelEconomyCalculatorTest {
             0.001
         )
     }
+
+    @Test
+    fun sortEntries_ordersBySelectedSortWithoutAlteringChronologicalStats() {
+        val oldest = FuelEntry("1", 10_000L, 1000.0, 5.0, 500.0, null, true)
+        val middle = FuelEntry("2", 20_000L, 1200.0, 4.0, 800.0, null, true)
+        val newest = FuelEntry("3", 30_000L, 1380.0, 6.0, 600.0, null, true)
+
+        val calculated = FuelEconomyCalculator.recalculateChainedStats(listOf(oldest, newest, middle))
+        assertEquals(listOf("3", "2", "1"), FuelEconomyCalculator.sortEntries(calculated, FuelSortOrder.DATE_DESC).map { it.id })
+        assertEquals(listOf("1", "2", "3"), FuelEconomyCalculator.sortEntries(calculated, FuelSortOrder.DATE_ASC).map { it.id })
+        assertEquals(listOf("3", "2", "1"), FuelEconomyCalculator.sortEntries(calculated, FuelSortOrder.ODO_DESC).map { it.id })
+        assertEquals(listOf("2", "3", "1"), FuelEconomyCalculator.sortEntries(calculated, FuelSortOrder.COST_DESC).map { it.id })
+        // middle has 200/4 = 50 km/l, newest has 180/6 = 30 km/l, oldest is baseline null
+        assertEquals(listOf("2", "3", "1"), FuelEconomyCalculator.sortEntries(calculated, FuelSortOrder.MILEAGE_DESC).map { it.id })
+    }
 }

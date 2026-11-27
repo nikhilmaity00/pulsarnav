@@ -1782,9 +1782,11 @@ class BajajBleManager private constructor(private val context: Context) {
         val wasDifferent = activeNavStep == null ||
             activeNavStep?.distanceMeters != step.distanceMeters ||
             activeNavStep?.maneuver != step.maneuver ||
+            activeNavStep?.roundaboutExit != step.roundaboutExit ||
             activeNavStep?.streetName != step.streetName ||
             activeNavStep?.etaHour != step.etaHour ||
-            activeNavStep?.etaMinute != step.etaMinute
+            activeNavStep?.etaMinute != step.etaMinute ||
+            activeNavStep?.etaIsAm != step.etaIsAm
         activeNavStep = step
         isNavigationActive = true
         _simulatedNavStep.value = null

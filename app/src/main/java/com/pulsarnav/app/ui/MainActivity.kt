@@ -75,7 +75,9 @@ import com.pulsarnav.app.data.AppSettings
 import com.pulsarnav.app.databinding.ActivityMainBinding
 import com.pulsarnav.app.debug.DebugLogRepository
 import com.pulsarnav.app.location.ParkingManager
+import com.pulsarnav.app.maintenance.FuelEconomyCalculator
 import com.pulsarnav.app.maintenance.FuelLogManager
+import com.pulsarnav.app.maintenance.FuelSortOrder
 import com.pulsarnav.app.maintenance.MaintenanceManager
 import com.pulsarnav.app.media.MediaControlManager
 import com.pulsarnav.app.model.Maneuver
@@ -457,6 +459,7 @@ class MainActivity : AppCompatActivity() {
             themeProvider = { currentTheme },
             createThemedEditText = { hint, initial, inputType -> createThemedEditText(hint, initial, inputType) },
             isWifiEnabled = { isWifiEnabled() },
+            isLocationEnabled = { isLocationEnabled() },
             promptEnableWifiForConfig = { onReady -> promptEnableWifi(PendingWifiActionType.CONFIG_DIALOG, onReady) },
             isNotificationAccessGranted = { isNotificationAccessGranted() },
             onLaunchGoogleMapsRide = { launchGoogleMapsRide() },
@@ -1344,6 +1347,10 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             showAddFuelDialog()
         }
+        binding.tabFuel.btnSortFuel.setOnClickListener {
+            provideHapticFeedback()
+            showFuelSortDialog()
+        }
         binding.tabFuel.layoutFuelInvestment.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
@@ -1377,6 +1384,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun proceedWithGoogleMapsLaunch() {
         BikeBleForegroundService.start(this)
+        if (!isLocationEnabled()) {
+            showFeedback("GPS is OFF — launching Maps anyway; turn ON Location for live tracking", isAlert = true)
+        }
         if (appSettings.preferredNavApp == AppSettings.NAV_APP_WAZE) {
             try {
                 val launchIntent = packageManager.getLaunchIntentForPackage("com.waze")?.apply {
@@ -3095,6 +3105,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun proceedWithNavigationLaunch(destination: String) {
+        if (!isLocationEnabled()) {
+            showFeedback("GPS is OFF — launching navigation anyway; turn ON Location for live tracking", isAlert = true)
+        }
         if (!NavigationIntentLauncher.launchNavigation(this, destination)) {
             showFeedback("Could not open navigation app", isAlert = true)
         }
@@ -3334,6 +3347,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showFuelDatePicker(currentMs: Long, onDatePicked: (Long) -> Unit) {
+        val origCal = Calendar.getInstance().apply { timeInMillis = currentMs }
+        DatePickerDialog(
+            this,
+            { _, year, month, dayOfMonth ->
+                val picked = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                    set(Calendar.HOUR_OF_DAY, origCal.get(Calendar.HOUR_OF_DAY))
+                    set(Calendar.MINUTE, origCal.get(Calendar.MINUTE))
+                    set(Calendar.SECOND, origCal.get(Calendar.SECOND))
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val nowMs = System.currentTimeMillis()
+                onDatePicked(picked.timeInMillis.coerceAtMost(nowMs))
+            },
+            origCal.get(Calendar.YEAR),
+            origCal.get(Calendar.MONTH),
+            origCal.get(Calendar.DAY_OF_MONTH)
+        ).apply {
+            datePicker.maxDate = System.currentTimeMillis()
+            show()
+        }
+    }
+
+    private fun formatFuelDialogDate(timestampMs: Long): String =
+        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(timestampMs))
+
     private fun showAddFuelDialog() {
         val currentOdo = maintenanceManager.status.value.totalOdometerKm
         val petrolRate = appSettings.petrolPricePerLiter
@@ -3341,6 +3383,7 @@ class MainActivity : AppCompatActivity() {
         val model = appSettings.getActiveBikeProfile()
         val tankMax = model.tankCapacityLiters.toDouble().coerceAtLeast(1.0)
         val tankMaxFloat = tankMax.toFloat()
+        var selectedTimestampMs = System.currentTimeMillis()
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -3452,6 +3495,28 @@ class MainActivity : AppCompatActivity() {
         layout.addView(tvLitersLabel)
         layout.addView(litersInput)
 
+        val tvDateLabel = TextView(this).apply {
+            text = "Refill Date:"
+            setTextColor(currentTheme.textTertiaryColor)
+            textSize = 11f
+            setPadding(0, 8, 0, 4)
+        }
+        val btnDatePicker = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = formatFuelDialogDate(selectedTimestampMs)
+            textSize = 12f
+            setTextColor(currentTheme.accentColor)
+            strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
+            setOnClickListener {
+                provideHapticFeedback()
+                showFuelDatePicker(selectedTimestampMs) { pickedMs ->
+                    selectedTimestampMs = pickedMs
+                    text = formatFuelDialogDate(selectedTimestampMs)
+                }
+            }
+        }
+        layout.addView(tvDateLabel)
+        layout.addView(btnDatePicker)
+
         val checkFullTank = com.google.android.material.checkbox.MaterialCheckBox(this).apply {
             text = "Full Tank refill (Calculates true mileage)"
             isChecked = true
@@ -3470,18 +3535,28 @@ class MainActivity : AppCompatActivity() {
 
                 if (odo != null && liters != null && cost != null && liters > 0) {
                     val isFull = checkFullTank.isChecked
-                    val entry = fuelLogManager.addFuelEntry(odo, liters, cost, isFullTank = isFull)
+                    val latestExistingMs = fuelLogManager.entries.value.maxOfOrNull { it.timestampMs } ?: 0L
+                    val isMostRecentFill = latestExistingMs == 0L || selectedTimestampMs >= latestExistingMs
+                    val entry = fuelLogManager.addFuelEntry(
+                        odometerKm = odo,
+                        liters = liters,
+                        totalCostInr = cost,
+                        isFullTank = isFull,
+                        timestampMs = selectedTimestampMs
+                    )
                     provideHapticFeedback()
 
-                    val currentLiters = appSettings.fuelLevelLiters
-                    val newLiters = if (isFull) tankMaxFloat else (currentLiters + liters.toFloat()).coerceIn(0.0f, tankMaxFloat)
-                    val newPercent = ((newLiters / tankMaxFloat) * 100f).roundToInt().coerceIn(0, 100)
-                    val avgMileage = fuelLogManager.stats.value.averageKmpl.coerceIn(25.0, 50.0)
-                    val newDte = (newLiters * avgMileage).toInt()
+                    if (isMostRecentFill) {
+                        val currentLiters = appSettings.fuelLevelLiters
+                        val newLiters = if (isFull) tankMaxFloat else (currentLiters + liters.toFloat()).coerceIn(0.0f, tankMaxFloat)
+                        val newPercent = ((newLiters / tankMaxFloat) * 100f).roundToInt().coerceIn(0, 100)
+                        val avgMileage = fuelLogManager.stats.value.averageKmpl.coerceIn(25.0, 50.0)
+                        val newDte = (newLiters * avgMileage).toInt()
 
-                    appSettings.fuelLevelLiters = newLiters
-                    appSettings.fuelLevelPercent = newPercent
-                    appSettings.projectedDteKm = newDte
+                        appSettings.fuelLevelLiters = newLiters
+                        appSettings.fuelLevelPercent = newPercent
+                        appSettings.projectedDteKm = newDte
+                    }
                     recordSyncTime()
                     updateHeroRangeDisplay()
 
@@ -3776,22 +3851,26 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun updateHardwareReadinessUi() {
-        val btAdapter = (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-        val isBtOn = btAdapter?.isEnabled == true
+    private fun isLocationEnabled(): Boolean {
         val locManager = getSystemService(LOCATION_SERVICE) as? LocationManager
-        val isGpsOn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             locManager?.isLocationEnabled == true
         } else {
             locManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
         }
+    }
+
+    private fun updateHardwareReadinessUi() {
+        val btAdapter = (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        val isBtOn = btAdapter?.isEnabled == true
+        val isGpsOn = isLocationEnabled()
         val isGpsRequiredForBle = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
 
         val missingBle = getMissingBlePermissions()
         val hasPerms = missingBle.isEmpty()
 
         binding.chipBtWarning.visibility = if (!isBtOn) View.VISIBLE else View.GONE
-        binding.chipGpsWarning.visibility = if (isGpsRequiredForBle && !isGpsOn) View.VISIBLE else View.GONE
+        binding.chipGpsWarning.visibility = if (!isGpsOn) View.VISIBLE else View.GONE
         binding.chipPermWarning.visibility = if (!hasPerms) View.VISIBLE else View.GONE
 
         val isConnected = bleManager.connectionState.value is BleConnectionState.Connected
@@ -3813,6 +3892,10 @@ class MainActivity : AppCompatActivity() {
                     binding.tabCockpit.tvSubStatus.text = "Turn ON Location (GPS) in Quick Settings"
                     binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
                 }
+                !isGpsOn -> {
+                    binding.tabCockpit.tvSubStatus.text = "Location (GPS) is OFF • BLE ready, turn ON for nav"
+                    binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+                }
                 else -> {
                     binding.tabCockpit.tvSubStatus.text = if (bleManager.isAutoConnectEnabled) {
                         "Auto-connect active • waiting for bike"
@@ -3828,12 +3911,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkAndStartScan(silent: Boolean = false) {
         val btAdapter = (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
         val isBtOn = btAdapter?.isEnabled == true
-        val locManager = getSystemService(LOCATION_SERVICE) as? LocationManager
-        val isGpsOn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locManager?.isLocationEnabled == true
-        } else {
-            locManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
-        }
+        val isGpsOn = isLocationEnabled()
         val isGpsRequiredForBle = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
 
         updateHardwareReadinessUi()
@@ -4720,10 +4798,32 @@ class MainActivity : AppCompatActivity() {
                 textLayout.addView(tvDesc)
                 textLayout.addView(tvDate)
 
+                val btnEdit = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                    text = "Edit"
+                    textSize = 10f
+                    setPadding(0, 0, 0, 0)
+                    insetTop = 0
+                    insetBottom = 0
+                    minWidth = 0
+                    minimumWidth = 0
+                    layoutParams = LinearLayout.LayoutParams(dpToPx(46), dpToPx(32)).apply {
+                        marginEnd = dpToPx(6)
+                    }
+                    setOnClickListener {
+                        provideHapticFeedback()
+                        showEditBikeIssueDialog(issue) {
+                            updateBikeIssuesSummary()
+                            renderIssues()
+                        }
+                    }
+                }
+
                 val btnDel = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                     text = "Del"
                     textSize = 10f
                     setPadding(0, 0, 0, 0)
+                    insetTop = 0
+                    insetBottom = 0
                     minWidth = 0
                     minimumWidth = 0
                     layoutParams = LinearLayout.LayoutParams(dpToPx(44), dpToPx(32))
@@ -4737,6 +4837,7 @@ class MainActivity : AppCompatActivity() {
 
                 itemRow.addView(chk)
                 itemRow.addView(textLayout)
+                itemRow.addView(btnEdit)
                 itemRow.addView(btnDel)
                 listContainer.addView(itemRow)
             }
@@ -4756,6 +4857,39 @@ class MainActivity : AppCompatActivity() {
         renderIssues()
         dialog.setContentView(root)
         dialog.show()
+    }
+
+    private fun showEditBikeIssueDialog(
+        issue: AppSettings.BikeIssue,
+        onSaved: () -> Unit
+    ) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 12)
+        }
+        val etEditIssue = createThemedEditText(
+            hintText = "Issue description...",
+            initialText = issue.title
+        ).apply {
+            setSelection(text?.length ?: 0)
+        }
+        layout.addView(etEditIssue)
+
+        MaterialAlertDialogBuilder(this, R.style.ObsidianAlertDialog)
+            .setTitle("Edit Repair Issue")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+                val updated = etEditIssue.text.toString().trim()
+                if (appSettings.updateBikeIssue(issue.id, updated)) {
+                    provideHapticFeedback()
+                    onSaved()
+                    showFeedback("Checklist item updated")
+                } else {
+                    showFeedback("Please enter a valid issue description", isAlert = true)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     @SuppressLint("SetTextI18n")
@@ -4839,27 +4973,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showFuelSortDialog() {
+        val options = FuelSortOrder.entries
+        val currentOrder = FuelSortOrder.fromKey(appSettings.fuelSortOrder)
+        val currentIdx = options.indexOf(currentOrder).coerceAtLeast(0)
+        MaterialAlertDialogBuilder(this, R.style.ObsidianAlertDialog)
+            .setTitle("Sort Refueling History")
+            .setSingleChoiceItems(options.map { it.label }.toTypedArray(), currentIdx) { dialog, which ->
+                val picked = options[which]
+                appSettings.fuelSortOrder = picked.key
+                updateFuelList(fuelLogManager.entries.value)
+                provideHapticFeedback()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun updateFuelList(entries: List<com.pulsarnav.app.maintenance.FuelEntry>) {
-        fuelListAdapter.submitList(entries.toList())
-        val isEmpty = entries.isEmpty()
+        val sortOrder = FuelSortOrder.fromKey(appSettings.fuelSortOrder)
+        binding.tabFuel.btnSortFuel.text = "Sort: ${sortOrder.shortLabel}"
+        val sorted = FuelEconomyCalculator.sortEntries(entries, sortOrder)
+        fuelListAdapter.submitList(sorted)
+        val isEmpty = sorted.isEmpty()
         binding.tabFuel.tvFuelEmptyState.visibility = if (isEmpty) View.VISIBLE else View.GONE
         binding.tabFuel.rvFuelList.visibility = if (isEmpty) View.GONE else View.VISIBLE
     }
 
 
     private fun showEditFuelEntryDialog(entry: com.pulsarnav.app.maintenance.FuelEntry) {
+        var selectedTimestampMs = entry.timestampMs
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 20, 48, 10)
         }
 
         val tvInfo = TextView(this).apply {
-            text = "Refuel recorded on ${entry.formattedDate}\nTap Save to recalculate running economy or Delete to remove:"
+            text = "Tap Refill Date to change when fuel was filled, Save to recalculate running economy, or Delete to remove:"
             setTextColor(currentTheme.textSecondaryColor)
             textSize = 12f
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, 12)
         }
         layout.addView(tvInfo)
+
+        val btnDatePicker = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Refill Date: ${formatFuelDialogDate(selectedTimestampMs)}"
+            textSize = 12f
+            setTextColor(currentTheme.accentColor)
+            strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
+            setOnClickListener {
+                provideHapticFeedback()
+                showFuelDatePicker(selectedTimestampMs) { pickedMs ->
+                    selectedTimestampMs = pickedMs
+                    text = "Refill Date: ${formatFuelDialogDate(selectedTimestampMs)}"
+                }
+            }
+        }
+        layout.addView(btnDatePicker)
 
         val odoInput = createThemedEditText(
             hintText = "Odometer (km)",
@@ -4909,7 +5079,14 @@ class MainActivity : AppCompatActivity() {
                 val lit = parseDecimal(litersInput.text)
                 val cost = parseDecimal(costInput.text)
                 if (odo != null && odo >= 0 && lit != null && lit > 0 && cost != null && cost >= 0) {
-                    fuelLogManager.updateFuelEntry(entry.id, odo, lit, cost, isFullTank = checkFullTank.isChecked)
+                    fuelLogManager.updateFuelEntry(
+                        id = entry.id,
+                        odometerKm = odo,
+                        liters = lit,
+                        totalCostInr = cost,
+                        isFullTank = checkFullTank.isChecked,
+                        timestampMs = selectedTimestampMs
+                    )
                     recordSyncTime()
                     updateHeroRangeDisplay()
                     provideHapticFeedback()

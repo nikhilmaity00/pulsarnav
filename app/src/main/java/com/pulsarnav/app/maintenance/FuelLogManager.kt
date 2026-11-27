@@ -59,11 +59,12 @@ class FuelLogManager private constructor(private val context: Context) {
         odometerKm: Double,
         liters: Double,
         totalCostInr: Double,
-        isFullTank: Boolean = true
+        isFullTank: Boolean = true,
+        timestampMs: Long = System.currentTimeMillis()
     ): FuelEntry {
         val entry = FuelEntry(
             id = UUID.randomUUID().toString(),
-            timestampMs = System.currentTimeMillis(),
+            timestampMs = timestampMs,
             odometerKm = odometerKm,
             liters = liters,
             totalCostInr = totalCostInr,
@@ -92,7 +93,8 @@ class FuelLogManager private constructor(private val context: Context) {
         odometerKm: Double,
         liters: Double,
         totalCostInr: Double,
-        isFullTank: Boolean? = null
+        isFullTank: Boolean? = null,
+        timestampMs: Long? = null
     ): FuelEntry? {
         val current = _entries.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
@@ -100,6 +102,7 @@ class FuelLogManager private constructor(private val context: Context) {
 
         val old = current[index]
         val updated = old.copy(
+            timestampMs = timestampMs ?: old.timestampMs,
             odometerKm = odometerKm,
             liters = liters,
             totalCostInr = totalCostInr,

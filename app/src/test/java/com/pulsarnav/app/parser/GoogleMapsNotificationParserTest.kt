@@ -67,6 +67,35 @@ class GoogleMapsNotificationParserTest {
         )
         assertNotNull(secondExit)
         assertEquals(2, secondExit!!.roundaboutExit)
+
+        val ordinalExitOnly = GoogleMapsNotificationParser.parse(
+            title = "150 m",
+            text = "Take the 3rd exit onto Ring Rd",
+            subtext = "2 km"
+        )
+        assertNotNull(ordinalExitOnly)
+        assertEquals(Maneuver.ROUNDABOUT_RIGHT, ordinalExitOnly!!.maneuver)
+        assertEquals(3, ordinalExitOnly.roundaboutExit)
+
+        val splitFields = GoogleMapsNotificationParser.parse(
+            title = "At the roundabout",
+            text = "Take the 2nd exit",
+            primaryInfo = "120 m",
+            subtext = "4 km"
+        )
+        assertNotNull(splitFields)
+        assertEquals(Maneuver.ROUNDABOUT_RIGHT, splitFields!!.maneuver)
+        assertEquals(2, splitFields.roundaboutExit)
+        assertEquals(120, splitFields.distanceMeters)
+
+        val trafficCircleLeft = GoogleMapsNotificationParser.parse(
+            title = "180 m",
+            text = "At the traffic circle, turn left onto 4th exit",
+            subtext = "2 km"
+        )
+        assertNotNull(trafficCircleLeft)
+        assertEquals(Maneuver.ROUNDABOUT_LEFT, trafficCircleLeft!!.maneuver)
+        assertEquals(4, trafficCircleLeft.roundaboutExit)
     }
 
     @Test

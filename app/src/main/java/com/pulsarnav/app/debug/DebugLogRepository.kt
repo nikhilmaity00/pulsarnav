@@ -444,9 +444,18 @@ object DebugLogRepository {
         } else {
             String.format(Locale.US, "%d.%02dkm", stepWhole, stepFrac.coerceIn(0, 99))
         }
+        val roundaboutExit = (b[7].toInt() ushr 4) and 0x0F
+        val exitTag = if (maneuver == Maneuver.ROUNDABOUT_LEFT ||
+            maneuver == Maneuver.ROUNDABOUT_RIGHT ||
+            roundaboutExit > 0
+        ) {
+            " exit=$roundaboutExit"
+        } else {
+            ""
+        }
         val iconLabel = maneuver?.name ?: "OP_$baseOpcode"
         val blinkTag = if (blinking) "*" else ""
-        return "0110 $iconLabel$blinkTag $distLabel \"${street.ifEmpty { "-" }}\""
+        return "0110 $iconLabel$blinkTag$exitTag $distLabel \"${street.ifEmpty { "-" }}\""
     }
 
     private fun summarizeGeneralPacket(b: ByteArray): String {

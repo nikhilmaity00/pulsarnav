@@ -51,6 +51,7 @@ class NavigationHubController(
     private val themeProvider: () -> CockpitTheme,
     private val createThemedEditText: (String?, String?, Int?) -> EditText,
     private val isWifiEnabled: () -> Boolean,
+    private val isLocationEnabled: () -> Boolean,
     private val promptEnableWifiForConfig: (onReady: () -> Unit) -> Unit,
     private val isNotificationAccessGranted: () -> Boolean,
     private val onLaunchGoogleMapsRide: () -> Unit,
@@ -398,7 +399,11 @@ class NavigationHubController(
                             state.remainingEtaText.ifBlank { null }
                         ).joinToString(" • ").ifBlank { "Route ready" }
                         sheetBinding.btnStopTftRoute.visibility = View.VISIBLE
-                        onFeedback(message, false)
+                        if (!isLocationEnabled()) {
+                            onFeedback("GPS is OFF — $message (turn ON Location for live tracking)", true)
+                        } else {
+                            onFeedback(message, false)
+                        }
                         if (autoStart) {
                             activity.lifecycleScope.launch {
                                 delay(1200)
@@ -522,6 +527,9 @@ class NavigationHubController(
         sheetBinding.btnLaunchGoogleMaps.setOnClickListener {
             val q = sheetBinding.etNavDestination.text.toString().trim()
             if (q.isNotBlank()) {
+                if (!isLocationEnabled()) {
+                    onFeedback("GPS is OFF — turn ON Location for live navigation tracking", true)
+                }
                 val gmmIntentUri = Uri.parse("google.navigation:q=" + Uri.encode(q))
                 val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
                     setPackage("com.google.android.apps.maps")

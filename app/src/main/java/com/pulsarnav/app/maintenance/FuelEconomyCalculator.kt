@@ -1,5 +1,18 @@
 package com.pulsarnav.app.maintenance
 
+enum class FuelSortOrder(val key: String, val label: String, val shortLabel: String) {
+    DATE_DESC("date_desc", "Date (Newest first)", "Date ↓"),
+    DATE_ASC("date_asc", "Date (Oldest first)", "Date ↑"),
+    ODO_DESC("odo_desc", "Odometer (High → Low)", "Odo ↓"),
+    COST_DESC("cost_desc", "Amount (High → Low)", "Cost ↓"),
+    MILEAGE_DESC("mileage_desc", "Mileage (Best first)", "km/l ↓");
+
+    companion object {
+        fun fromKey(key: String?): FuelSortOrder =
+            entries.firstOrNull { it.key == key } ?: DATE_DESC
+    }
+}
+
 /**
  * Pure-Kotlin fuel economy and chained full-tank / partial-fill mileage calculator.
  */
@@ -7,6 +20,28 @@ object FuelEconomyCalculator {
 
     private const val MIN_VALID_KMPL = 5.0
     private const val MAX_VALID_KMPL = 120.0
+
+    fun sortEntries(entries: List<FuelEntry>, sortOrder: FuelSortOrder): List<FuelEntry> {
+        if (entries.size <= 1) return entries.toList()
+        return when (sortOrder) {
+            FuelSortOrder.DATE_DESC -> entries.sortedWith(
+                compareByDescending<FuelEntry> { it.timestampMs }.thenByDescending { it.odometerKm }
+            )
+            FuelSortOrder.DATE_ASC -> entries.sortedWith(
+                compareBy<FuelEntry> { it.timestampMs }.thenBy { it.odometerKm }
+            )
+            FuelSortOrder.ODO_DESC -> entries.sortedWith(
+                compareByDescending<FuelEntry> { it.odometerKm }.thenByDescending { it.timestampMs }
+            )
+            FuelSortOrder.COST_DESC -> entries.sortedWith(
+                compareByDescending<FuelEntry> { it.totalCostInr }.thenByDescending { it.timestampMs }
+            )
+            FuelSortOrder.MILEAGE_DESC -> entries.sortedWith(
+                compareByDescending<FuelEntry> { it.calculatedKmpl ?: -1.0 }
+                    .thenByDescending { it.timestampMs }
+            )
+        }
+    }
 
     /**
      * Sorts entries newest-first while computing accurate tank-to-tank mileage across

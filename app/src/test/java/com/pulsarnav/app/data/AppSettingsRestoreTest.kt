@@ -64,6 +64,10 @@ class AppSettingsRestoreTest {
             AppSettings.coerceRestoreValue(AppSettings.KEY_SMS_REJECT_MESSAGE, "Riding now") { false }
         )
         assertEquals(
+            RestoreAction.PutString("odo_desc"),
+            AppSettings.coerceRestoreValue(AppSettings.KEY_FUEL_SORT_ORDER, "odo_desc") { false }
+        )
+        assertEquals(
             RestoreAction.PutBoolean(true),
             AppSettings.coerceRestoreValue(AppSettings.KEY_SMS_REJECT_ENABLED, "true") { false }
         )

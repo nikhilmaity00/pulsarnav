@@ -342,6 +342,8 @@ object CockpitThemeApplier {
         fuel.tvFuelPriceTitle.setTextColor(theme.textPrimaryColor)
         fuel.tvFuelPriceCountrySubtitle.setTextColor(theme.textSecondaryColor)
         fuel.tvEditFuelPriceAction.setTextColor(theme.accentColor)
+        applyRoundedSurfaceBox(context, fuel.btnSortFuel, theme.subtleColor, theme.borderColor, 14)
+        fuel.btnSortFuel.setTextColor(theme.accentColor)
 
         // 8. Support Tab Elements
         styleSubtleOutlinedButton(support.tvServiceHistoryAction, theme)

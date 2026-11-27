@@ -80,8 +80,15 @@ object GoogleMapsNotificationParser {
             ?: classifyFromText(instructionContent, parsedStepDist)
         var classifiedManeuver = textResult?.maneuver
         var roundaboutExit = textResult?.roundaboutExit ?: 0
-        if (roundaboutExit == 0 && (classifiedManeuver == Maneuver.ROUNDABOUT_LEFT || classifiedManeuver == Maneuver.ROUNDABOUT_RIGHT)) {
-            roundaboutExit = parseRoundaboutExit(instructionContent)
+        if (classifiedManeuver == Maneuver.ROUNDABOUT_LEFT || classifiedManeuver == Maneuver.ROUNDABOUT_RIGHT) {
+            if (roundaboutExit == 0) {
+                roundaboutExit = parseRoundaboutExit(instructionContent, requireRoundaboutKeyword = false)
+            }
+            if (classifiedManeuver == Maneuver.ROUNDABOUT_RIGHT &&
+                ROUNDABOUT_LEFT_REGEX.containsMatchIn(instructionContent)
+            ) {
+                classifiedManeuver = Maneuver.ROUNDABOUT_LEFT
+            }
         }
 
         if (iconObj != null && (classifiedManeuver == null ||
@@ -93,7 +100,7 @@ object GoogleMapsNotificationParser {
                 if (classifiedManeuver == null) {
                     classifiedManeuver = match.maneuver
                     if (classifiedManeuver == Maneuver.ROUNDABOUT_LEFT || classifiedManeuver == Maneuver.ROUNDABOUT_RIGHT) {
-                        roundaboutExit = parseRoundaboutExit(instructionContent)
+                        roundaboutExit = parseRoundaboutExit(instructionContent, requireRoundaboutKeyword = false)
                     }
                 } else if ((match.maneuver == Maneuver.ROUNDABOUT_LEFT || match.maneuver == Maneuver.ROUNDABOUT_RIGHT) &&
                     !ROUNDABOUT_LEFT_REGEX.containsMatchIn(instructionContent) &&
@@ -162,10 +169,16 @@ object GoogleMapsNotificationParser {
         "(?i)(?:take\\s+(?:the\\s+)?)?(\\d+)(?:st|nd|rd|th)?\\s+exit|(?:take\\s+)?exit\\s+(\\d+)|roundabout.*exit\\s*(\\d+)|leave.*roundabout.*(\\d+)",
         Pattern.CASE_INSENSITIVE
     )
+    private val ROUNDABOUT_ORDINAL_EXIT_REGEX = Regex(
+        "(?i)\\b(?:take\\s+(?:the\\s+)?)?(?:1st|2nd|3rd|[4-8]th|first|second|third|fourth|fifth|sixth|seventh|eighth)\\s+exit\\b"
+    )
 
-    fun parseRoundaboutExit(text: String): Int {
+    fun parseRoundaboutExit(text: String, requireRoundaboutKeyword: Boolean = true): Int {
         val s = text.lowercase()
-        if (!s.contains("roundabout") && !s.contains("rotary")) return 0
+        val hasRoundaboutKeyword = s.contains("roundabout") || s.contains("rotary") || s.contains("traffic circle")
+        if (requireRoundaboutKeyword && !hasRoundaboutKeyword && !ROUNDABOUT_ORDINAL_EXIT_REGEX.containsMatchIn(s)) {
+            return 0
+        }
 
         val m = ROUNDABOUT_EXIT_REGEX.matcher(s)
         if (m.find()) {
@@ -203,6 +216,7 @@ object GoogleMapsNotificationParser {
                 s.contains("slight") || s.contains("sharp") ||
                 s.contains("fork") || s.contains("ramp") ||
                 s.contains("roundabout") || s.contains("rotary") ||
+                s.contains("traffic circle") || ROUNDABOUT_ORDINAL_EXIT_REGEX.containsMatchIn(s) ||
                 s.contains("u-turn") || s.contains("uturn")
 
         val isArrivalKeyword = s == "destination" || s.contains("your destination") ||
@@ -212,10 +226,14 @@ object GoogleMapsNotificationParser {
             return ManeuverResult(Maneuver.DESTINATION_REACHED, 0)
         }
 
-        // 2. Roundabout / Rotary with exit number extraction
-        val isRoundabout = s.contains("roundabout") || s.contains("rotary") || s.contains("at the roundabout")
+        // 2. Roundabout / Rotary / Ordinal Exit (e.g. "Take the 2nd exit") with exit number extraction
+        val isRoundabout = s.contains("roundabout") ||
+                s.contains("rotary") ||
+                s.contains("at the roundabout") ||
+                s.contains("traffic circle") ||
+                ROUNDABOUT_ORDINAL_EXIT_REGEX.containsMatchIn(s)
         if (isRoundabout) {
-            val exit = parseRoundaboutExit(s)
+            val exit = parseRoundaboutExit(s, requireRoundaboutKeyword = false)
             val m = if (ROUNDABOUT_LEFT_REGEX.containsMatchIn(s)) Maneuver.ROUNDABOUT_LEFT else Maneuver.ROUNDABOUT_RIGHT
             return ManeuverResult(m, exit)
         }
