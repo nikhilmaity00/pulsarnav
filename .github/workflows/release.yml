@@ -2,9 +2,15 @@ name: Build & Release APK
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -17,6 +23,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -71,26 +79,67 @@ jobs:
           fi
 
       - name: Prepare APK Asset
+        id: prep
         run: |
-          TAG_NAME="${{ github.ref_name }}"
-          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "master" ]; then
-            TAG_NAME="latest"
-          fi
-          TAG_NAME="${TAG_NAME//\//-}"
+          VERSION_NAME="$(sed -nE 's/.*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n1)"
+          SHORT_SHA="${GITHUB_SHA::7}"
           mkdir -p release-artifacts
-          cp app/build/outputs/apk/release/app-release.apk "release-artifacts/PulsarNav-${TAG_NAME}.apk"
-          (cd release-artifacts && sha256sum "PulsarNav-${TAG_NAME}.apk" > "PulsarNav-${TAG_NAME}.apk.sha256")
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+            IS_PRERELEASE="false"
+            PUBLISH_RELEASE="true"
+            RELEASE_TITLE="PulsarNav ${RELEASE_TAG}"
+            ASSET_BASE="PulsarNav-${RELEASE_TAG//\//-}"
+          elif [[ "$GITHUB_REF" == "refs/heads/master" ]]; then
+            PUBLISH_RELEASE="true"
+            if [[ -n "$VERSION_NAME" ]] && ! git rev-parse -q --verify "refs/tags/v${VERSION_NAME}" >/dev/null; then
+              RELEASE_TAG="v${VERSION_NAME}"
+              IS_PRERELEASE="false"
+              RELEASE_TITLE="PulsarNav v${VERSION_NAME}"
+              ASSET_BASE="PulsarNav-v${VERSION_NAME}"
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag -f master-latest "$GITHUB_SHA"
+              git push -f origin master-latest
+              RELEASE_TAG="master-latest"
+              IS_PRERELEASE="true"
+              RELEASE_TITLE="PulsarNav Master Build (${SHORT_SHA})"
+              ASSET_BASE="PulsarNav-master-latest"
+            fi
+          else
+            PUBLISH_RELEASE="false"
+            RELEASE_TAG=""
+            IS_PRERELEASE="true"
+            RELEASE_TITLE=""
+            REF_CLEAN="${GITHUB_REF_NAME:-dev}"
+            ASSET_BASE="PulsarNav-${REF_CLEAN//\//-}"
+          fi
+
+          cp app/build/outputs/apk/release/app-release.apk "release-artifacts/${ASSET_BASE}.apk"
+          (cd release-artifacts && sha256sum "${ASSET_BASE}.apk" > "${ASSET_BASE}.apk.sha256")
+
+          {
+            echo "publish_release=${PUBLISH_RELEASE}"
+            echo "release_tag=${RELEASE_TAG}"
+            echo "is_prerelease=${IS_PRERELEASE}"
+            echo "release_title=${RELEASE_TITLE}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.prep.outputs.publish_release == 'true'
         with:
+          tag_name: ${{ steps.prep.outputs.release_tag }}
+          name: ${{ steps.prep.outputs.release_title }}
           files: release-artifacts/*
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.prep.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ steps.prep.outputs.is_prerelease != 'true' && 'true' || 'false' }}
 
-      - name: Upload Artifact (Manual Run)
+      - name: Upload Artifact (Workflow Run)
         uses: actions/upload-artifact@v7
         if: "!startsWith(github.ref, 'refs/tags/')"
         with:
