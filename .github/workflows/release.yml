@@ -76,6 +76,7 @@ jobs:
           if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "master" ]; then
             TAG_NAME="latest"
           fi
+          TAG_NAME="${TAG_NAME//\//-}"
           mkdir -p release-artifacts
           cp app/build/outputs/apk/release/app-release.apk "release-artifacts/PulsarNav-${TAG_NAME}.apk"
           (cd release-artifacts && sha256sum "PulsarNav-${TAG_NAME}.apk" > "PulsarNav-${TAG_NAME}.apk.sha256")
