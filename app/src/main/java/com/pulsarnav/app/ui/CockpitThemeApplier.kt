@@ -236,7 +236,8 @@ object CockpitThemeApplier {
                 setCustomHexSafely(hex)
             }
         }
-        stylePrimaryFilledButton(account.btnApplyHex, theme)
+        account.btnApplyHex.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
+        account.btnApplyHex.setTextColor(theme.onPrimaryColor)
         if (themeKey == AppSettings.THEME_CUSTOM) {
             account.cardCustomRgb.strokeColor = theme.accentColor
             account.cardCustomRgb.strokeWidth = dpToPx(context, 2)
