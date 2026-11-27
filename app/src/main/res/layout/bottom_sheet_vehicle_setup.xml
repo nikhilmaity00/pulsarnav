@@ -130,7 +130,7 @@
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="18dp"
+        android:layout_marginBottom="16dp"
         app:cardBackgroundColor="@color/surface_card"
         app:cardCornerRadius="@dimen/card_corner_radius"
         app:cardElevation="0dp"

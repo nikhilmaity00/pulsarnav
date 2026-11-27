@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 4dp Spacing Scale -->
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">12dp</dimen>
+    <dimen name="space_lg">16dp</dimen>
+    <dimen name="space_xl">20dp</dimen>
+    <dimen name="space_2xl">24dp</dimen>
+
+    <!-- Screen Padding -->
+    <dimen name="screen_padding_horizontal">16dp</dimen>
+    <dimen name="screen_padding_top">12dp</dimen>
+    <dimen name="screen_padding_bottom">24dp</dimen>
+
     <!-- Card Uniform Metrics -->
     <dimen name="card_corner_radius">16dp</dimen>
     <dimen name="card_corner_radius_small">12dp</dimen>
@@ -10,7 +23,9 @@
     <!-- Button Heights & Dimensions -->
     <dimen name="btn_height_primary">50dp</dimen>
     <dimen name="btn_height_secondary">48dp</dimen>
-    <dimen name="btn_height_compact">44dp</dimen>
+    <dimen name="btn_height_compact">40dp</dimen>
+    <dimen name="btn_height_card_header">36dp</dimen>
     <dimen name="btn_corner_radius">12dp</dimen>
     <dimen name="btn_corner_radius_compact">8dp</dimen>
+    <dimen name="btn_corner_radius_pill">18dp</dimen>
 </resources>

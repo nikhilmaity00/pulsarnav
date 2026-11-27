@@ -126,7 +126,7 @@
                             android:background="@drawable/pill_badge"
                             android:backgroundTint="@color/status_connected_subtle"
                             android:paddingHorizontal="8dp"
-                            android:paddingVertical="3dp"
+                            android:paddingVertical="4dp"
                             android:text="ATTACHED"
                             android:textColor="@color/status_connected"
                             android:textSize="10sp"
@@ -158,7 +158,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="MH 12 AB 1234"
+                                android:text="@string/placeholder_dash"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:textStyle="bold" />
@@ -186,7 +186,7 @@
                                 android:ellipsize="middle"
                                 android:maxWidth="140dp"
                                 android:singleLine="true"
-                                android:text="rc_doc.pdf"
+                                android:text="No file"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                         </LinearLayout>
@@ -305,7 +305,7 @@
                             android:background="@drawable/pill_badge"
                             android:backgroundTint="@color/status_connected_subtle"
                             android:paddingHorizontal="8dp"
-                            android:paddingVertical="3dp"
+                            android:paddingVertical="4dp"
                             android:text="ACTIVE"
                             android:textColor="@color/status_connected"
                             android:textSize="10sp"
@@ -337,7 +337,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="BAJAJ-ALLIANZ-998811"
+                                android:text="@string/placeholder_dash"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:textStyle="bold" />
@@ -362,7 +362,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="15 Nov 2027"
+                                android:text="@string/placeholder_dash"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />
@@ -482,7 +482,7 @@
                             android:background="@drawable/pill_badge"
                             android:backgroundTint="@color/status_connected_subtle"
                             android:paddingHorizontal="8dp"
-                            android:paddingVertical="3dp"
+                            android:paddingVertical="4dp"
                             android:text="VALID"
                             android:textColor="@color/status_connected"
                             android:textSize="10sp"
@@ -514,7 +514,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="PUC-991288"
+                                android:text="@string/placeholder_dash"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:textStyle="bold" />
@@ -539,7 +539,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="20 Dec 2026"
+                                android:text="@string/placeholder_dash"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />

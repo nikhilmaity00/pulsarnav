@@ -378,7 +378,7 @@
                     android:background="@drawable/pill_badge"
                     android:backgroundTint="@color/surface_elevated"
                     android:paddingHorizontal="8dp"
-                    android:paddingVertical="3dp"
+                    android:paddingVertical="4dp"
                     android:text="TFT Ready"
                     android:textColor="@color/text_secondary"
                     android:textSize="10sp"

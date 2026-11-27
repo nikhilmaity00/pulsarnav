@@ -8,16 +8,11 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -31,7 +26,6 @@ import android.os.Bundle
 import android.provider.Settings
 import com.pulsarnav.app.data.VehicleCatalog
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -48,11 +42,8 @@ import android.view.Gravity
 import androidx.core.widget.NestedScrollView
 import com.google.android.material.checkbox.MaterialCheckBox
 import kotlin.math.roundToInt
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.android.material.snackbar.Snackbar
 import com.pulsarnav.app.data.DataVaultManager
-import com.pulsarnav.app.data.VaultPassphraseRequiredException
 import com.pulsarnav.app.maintenance.GloveboxDocumentStatus
 import com.pulsarnav.app.maintenance.GloveboxExpiryEvaluator
 import com.pulsarnav.app.maintenance.MaintenanceMath
@@ -63,17 +54,11 @@ import java.util.Date
 import java.util.Locale
 import android.text.Editable
 import android.text.TextWatcher
-import android.text.TextUtils
-import android.view.inputmethod.EditorInfo
-import android.widget.ProgressBar
-import com.pulsarnav.app.wifi.TftMapMathAndParser
-import android.webkit.MimeTypeMap
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -88,7 +73,6 @@ import com.pulsarnav.app.ble.BleConnectionState
 import com.pulsarnav.app.ble.DiscoveredBike
 import com.pulsarnav.app.data.AppSettings
 import com.pulsarnav.app.databinding.ActivityMainBinding
-import com.pulsarnav.app.debug.DebugFilter
 import com.pulsarnav.app.debug.DebugLogRepository
 import com.pulsarnav.app.location.ParkingManager
 import com.pulsarnav.app.maintenance.FuelLogManager
@@ -115,10 +99,6 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
-    private companion object {
-        private const val MAX_VAULT_IMPORT_BYTES = 5 * 1024 * 1024
-    }
-
     private lateinit var binding: ActivityMainBinding
     private lateinit var bleManager: BajajBleManager
     private lateinit var callManager: CallManager
@@ -132,8 +112,6 @@ class MainActivity : AppCompatActivity() {
     private var currentTheme: CockpitTheme = getThemeDefinition(AppSettings.THEME_WINE_RED, isLightMode = false)
 
     private var pendingDocType: String? = null
-    private var activeGloveboxSheet: BottomSheetDialog? = null
-    private var activeGloveboxView: View? = null
     private var activeServiceHistoryDialog: AlertDialog? = null
     private var roundaboutTestState = 0
     private val documentPicker = registerForActivityResult(
@@ -257,30 +235,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var statusDotAnimator: android.animation.ObjectAnimator? = null
+    private val statusDotPulseController = StatusDotPulseController()
+    private lateinit var fuelListAdapter: FuelListAdapter
+    private lateinit var discoveredBikeAdapter: DiscoveredBikeAdapter
+    private lateinit var gloveboxController: GloveboxSheetController
+    private lateinit var dataVaultController: DataVaultUiController
+    private lateinit var tftLabsController: TftLabsController
+    private lateinit var navigationHubController: NavigationHubController
 
-    private fun startStatusDotPulse(dotView: View) {
-        if (statusDotAnimator != null && statusDotAnimator?.isRunning == true) return
-        statusDotAnimator = android.animation.ObjectAnimator.ofFloat(dotView, "alpha", 0.35f, 1.0f).apply {
-            duration = 800L
-            repeatMode = android.animation.ValueAnimator.REVERSE
-            repeatCount = android.animation.ValueAnimator.INFINITE
-            start()
-        }
-    }
+    private fun startStatusDotPulse(dotView: View) = statusDotPulseController.start(dotView)
+    private fun stopStatusDotPulse(dotView: View) = statusDotPulseController.stop(dotView)
 
-    private fun stopStatusDotPulse(dotView: View) {
-        statusDotAnimator?.cancel()
-        statusDotAnimator = null
-        dotView.alpha = 1.0f
-    }
-
-    private var activeDebugFilter: DebugFilter = DebugFilter.ALL
-    private var isDebugLogPaused: Boolean = false
-    private var fullscreenTftDialog: Dialog? = null
-    private var fullscreenTftImageView: ImageView? = null
-    private var fullscreenTftMetricsView: TextView? = null
-    private var fullscreenTftTouchView: TextView? = null
     private val isAccountTabVisible = kotlinx.coroutines.flow.MutableStateFlow(false)
     private var currentActiveTabId: Int = R.id.nav_home
     private var isRestoringTabSelection = false
@@ -288,15 +253,6 @@ class MainActivity : AppCompatActivity() {
     private var isUpdatingHexText = false
     private var pendingSeekThemeRunnable: Runnable? = null
     private val mainUiHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var renderLogJob: kotlinx.coroutines.Job? = null
-    private var lastRenderedLogText: String? = null
-    private val previewDecodeLock = Any()
-    private val previewBitmapSlots = arrayOfNulls<Bitmap>(3)
-    private var previewBitmapSlotIdx = 0
-    private var lastDecodedFrameIndex = -1L
-    private val fullscreenBitmapSlots = arrayOfNulls<Bitmap>(3)
-    private var fullscreenBitmapSlotIdx = 0
-    private var lastFullscreenFrameIndex = -1L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         appSettings = AppSettings.getInstance(this)
@@ -312,9 +268,9 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (binding.scrollFuel.visibility == View.VISIBLE ||
-                    binding.scrollSupport.visibility == View.VISIBLE ||
-                    binding.scrollSettings.visibility == View.VISIBLE
+                if (binding.tabFuel.root.visibility == View.VISIBLE ||
+                    binding.tabSupport.root.visibility == View.VISIBLE ||
+                    binding.tabAccount.root.visibility == View.VISIBLE
                 ) {
                     binding.bottomNav.selectedItemId = R.id.nav_home
                 } else {
@@ -337,6 +293,9 @@ class MainActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
             callManager.initialize()
         }
+
+        // Setup Controllers & RecyclerViews
+        setupControllersAndAdapters()
 
         // Setup UI Sections
         setupBottomNavigation()
@@ -383,7 +342,7 @@ class MainActivity : AppCompatActivity() {
         // Show introduction / vehicle setup on first launch if not configured yet
         updateQuickNavButtons()
         updateFuelPriceUi()
-        binding.tvAppVersionTitle.text = "PulsarNav Companion v${com.pulsarnav.app.BuildConfig.VERSION_NAME}"
+        binding.tabAccount.tvAppVersionTitle.text = "PulsarNav Companion v${com.pulsarnav.app.BuildConfig.VERSION_NAME}"
 
         binding.root.post {
             if (!appSettings.isSetupCompleted) {
@@ -412,6 +371,98 @@ class MainActivity : AppCompatActivity() {
                 updateHardwareReadinessUi()
             }
         }
+    }
+
+    private fun setupControllersAndAdapters() {
+        fuelListAdapter = FuelListAdapter(
+            theme = currentTheme,
+            currencySymbol = appSettings.currentCurrencySymbol,
+            onEntryClick = { entry ->
+                provideHapticFeedback()
+                showEditFuelEntryDialog(entry)
+            }
+        )
+        binding.tabFuel.rvFuelList.apply {
+            layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
+            adapter = fuelListAdapter
+        }
+
+        discoveredBikeAdapter = DiscoveredBikeAdapter(
+            theme = currentTheme,
+            onConnectClick = { bike -> bleManager.connect(bike.device) }
+        )
+        binding.tabCockpit.rvDeviceList.apply {
+            layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
+            adapter = discoveredBikeAdapter
+        }
+
+        gloveboxController = GloveboxSheetController(
+            activity = this,
+            appSettings = appSettings,
+            themeProvider = { currentTheme },
+            createThemedEditText = { hint, initial, inputType -> createThemedEditText(hint, initial, inputType) },
+            launchDocumentPicker = { docType ->
+                pendingDocType = docType
+                try {
+                    documentPicker.launch(arrayOf("image/*", "application/pdf"))
+                } catch (e: Exception) {
+                    showFeedback("Could not open file picker: ${e.message}", isAlert = true)
+                }
+            },
+            onDocumentsChanged = { updateDocumentsSummary() },
+            onBikeInfoChanged = { updateBikeInfoDisplay() },
+            onRecordSyncTime = { recordSyncTime() },
+            onHaptic = { provideHapticFeedback() },
+            onFeedback = { msg, isAlert -> showFeedback(msg, isAlert = isAlert) }
+        )
+
+        dataVaultController = DataVaultUiController(
+            activity = this,
+            rootViewProvider = { binding.rootLayout },
+            themeProvider = { currentTheme },
+            createThemedEditText = { hint, initial, inputType -> createThemedEditText(hint, initial, inputType) },
+            launchVaultPickers = {
+                try {
+                    vaultGetContentPicker.launch("*/*")
+                } catch (_: Exception) {
+                    try {
+                        vaultFilePicker.launch(arrayOf("*/*"))
+                    } catch (e2: Exception) {
+                        showFeedback("File picker unavailable: ${e2.message}", isAlert = true)
+                    }
+                }
+            },
+            onRefreshAfterImport = { refreshAllUiAfterVaultImport() },
+            onHaptic = { provideHapticFeedback() },
+            onFeedback = { msg, isAlert -> showFeedback(msg, isAlert = isAlert) }
+        )
+
+        tftLabsController = TftLabsController(
+            activity = this,
+            dbg = binding.tabAccount.labsTftDebug,
+            appSettings = appSettings,
+            bleManager = bleManager,
+            callManager = callManager,
+            isAccountTabVisible = isAccountTabVisible,
+            themeProvider = { currentTheme },
+            onHaptic = { provideHapticFeedback() },
+            onFeedback = { msg, isAlert -> showFeedback(msg, isAlert = isAlert) }
+        )
+
+        navigationHubController = NavigationHubController(
+            activity = this,
+            appSettings = appSettings,
+            isAccountTabVisible = isAccountTabVisible,
+            isFullscreenShowing = { tftLabsController.isFullscreenShowing() },
+            themeProvider = { currentTheme },
+            createThemedEditText = { hint, initial, inputType -> createThemedEditText(hint, initial, inputType) },
+            isWifiEnabled = { isWifiEnabled() },
+            promptEnableWifiForConfig = { onReady -> promptEnableWifi(PendingWifiActionType.CONFIG_DIALOG, onReady) },
+            isNotificationAccessGranted = { isNotificationAccessGranted() },
+            onLaunchGoogleMapsRide = { launchGoogleMapsRide() },
+            onHaptic = { provideHapticFeedback() },
+            onFeedback = { msg, isAlert -> showFeedback(msg, isAlert = isAlert) }
+        )
     }
 
     override fun onStart() {
@@ -466,19 +517,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         pendingSeekThemeRunnable?.let { mainUiHandler.removeCallbacks(it) }
         pendingSeekThemeRunnable = null
-        renderLogJob?.cancel()
-        renderLogJob = null
-        fullscreenTftDialog?.dismiss()
-        fullscreenTftDialog = null
-        fullscreenTftImageView = null
-        fullscreenTftMetricsView = null
-        fullscreenTftTouchView = null
-        if (::binding.isInitialized) {
-            binding.labsTftDebug.ivTftDebugPreview.setImageDrawable(null)
-        }
-        synchronized(previewDecodeLock) {
-            previewBitmapSlots.fill(null)
-            fullscreenBitmapSlots.fill(null)
+        statusDotPulseController.cancelAll()
+        if (::tftLabsController.isInitialized) {
+            tftLabsController.cleanup()
         }
         if (!isChangingConfigurations) {
             TftWifiMirrorManager.getInstance(this).stopLocalDebugPreview()
@@ -574,7 +615,7 @@ class MainActivity : AppCompatActivity() {
         outState.putString("active_tab_key", tabKey)
         outState.putString("key_pending_wifi_action", pendingWifiActionType.name)
         if (::binding.isInitialized) {
-            outState.putInt("account_scroll_y", binding.scrollSettings.scrollY)
+            outState.putInt("account_scroll_y", binding.tabAccount.root.scrollY)
         }
         if (::appSettings.isInitialized) {
             appSettings.activeTabKey = tabKey
@@ -595,7 +636,7 @@ class MainActivity : AppCompatActivity() {
         if (savedTab != currentActiveTabId) {
             restoreActiveTab(savedTab, preservedAccountScrollY = savedAccountScrollY)
         } else if (savedTab == R.id.nav_account && savedAccountScrollY > 0) {
-            binding.scrollSettings.post { binding.scrollSettings.scrollTo(0, savedAccountScrollY) }
+            binding.tabAccount.root.post { binding.tabAccount.root.scrollTo(0, savedAccountScrollY) }
         }
     }
 
@@ -661,10 +702,10 @@ class MainActivity : AppCompatActivity() {
                 appSettings.activeTabKey = tabIdToKey(item.itemId)
             }
             when (item.itemId) {
-                R.id.nav_home -> switchTab(binding.scrollCockpit)
-                R.id.nav_fuel -> switchTab(binding.scrollFuel)
-                R.id.nav_support -> switchTab(binding.scrollSupport)
-                R.id.nav_account -> switchTab(binding.scrollSettings)
+                R.id.nav_home -> switchTab(binding.tabCockpit.root)
+                R.id.nav_fuel -> switchTab(binding.tabFuel.root)
+                R.id.nav_support -> switchTab(binding.tabSupport.root)
+                R.id.nav_account -> switchTab(binding.tabAccount.root)
                 else -> false
             }
         }
@@ -672,15 +713,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun restoreActiveTab(tabId: Int, preservedAccountScrollY: Int = 0) {
         val targetView = when (tabId) {
-            R.id.nav_fuel -> binding.scrollFuel
-            R.id.nav_support -> binding.scrollSupport
-            R.id.nav_account -> binding.scrollSettings
-            else -> binding.scrollCockpit
+            R.id.nav_fuel -> binding.tabFuel.root
+            R.id.nav_support -> binding.tabSupport.root
+            R.id.nav_account -> binding.tabAccount.root
+            else -> binding.tabCockpit.root
         }
         val normalizedId = when (targetView) {
-            binding.scrollFuel -> R.id.nav_fuel
-            binding.scrollSupport -> R.id.nav_support
-            binding.scrollSettings -> R.id.nav_account
+            binding.tabFuel.root -> R.id.nav_fuel
+            binding.tabSupport.root -> R.id.nav_support
+            binding.tabAccount.root -> R.id.nav_account
             else -> R.id.nav_home
         }
         currentActiveTabId = normalizedId
@@ -697,40 +738,40 @@ class MainActivity : AppCompatActivity() {
             resetAccountScrollToTop = (normalizedId == R.id.nav_account && preservedAccountScrollY == 0)
         )
         if (normalizedId == R.id.nav_account && preservedAccountScrollY > 0) {
-            binding.scrollSettings.post { binding.scrollSettings.scrollTo(0, preservedAccountScrollY) }
+            binding.tabAccount.root.post { binding.tabAccount.root.scrollTo(0, preservedAccountScrollY) }
         }
     }
 
     private fun switchTab(targetView: View, resetAccountScrollToTop: Boolean = true): Boolean {
-        val visibleCount = (if (binding.scrollCockpit.visibility == View.VISIBLE) 1 else 0) +
-            (if (binding.scrollFuel.visibility == View.VISIBLE) 1 else 0) +
-            (if (binding.scrollSupport.visibility == View.VISIBLE) 1 else 0) +
-            (if (binding.scrollSettings.visibility == View.VISIBLE) 1 else 0)
+        val visibleCount = (if (binding.tabCockpit.root.visibility == View.VISIBLE) 1 else 0) +
+            (if (binding.tabFuel.root.visibility == View.VISIBLE) 1 else 0) +
+            (if (binding.tabSupport.root.visibility == View.VISIBLE) 1 else 0) +
+            (if (binding.tabAccount.root.visibility == View.VISIBLE) 1 else 0)
         val alreadyVisible = targetView.visibility == View.VISIBLE && visibleCount == 1
         if (!alreadyVisible) {
-            binding.scrollCockpit.visibility = if (targetView === binding.scrollCockpit) View.VISIBLE else View.GONE
-            binding.scrollFuel.visibility = if (targetView === binding.scrollFuel) View.VISIBLE else View.GONE
-            binding.scrollSupport.visibility = if (targetView === binding.scrollSupport) View.VISIBLE else View.GONE
-            binding.scrollSettings.visibility = if (targetView === binding.scrollSettings) View.VISIBLE else View.GONE
+            binding.tabCockpit.root.visibility = if (targetView === binding.tabCockpit.root) View.VISIBLE else View.GONE
+            binding.tabFuel.root.visibility = if (targetView === binding.tabFuel.root) View.VISIBLE else View.GONE
+            binding.tabSupport.root.visibility = if (targetView === binding.tabSupport.root) View.VISIBLE else View.GONE
+            binding.tabAccount.root.visibility = if (targetView === binding.tabAccount.root) View.VISIBLE else View.GONE
         }
 
-        val isAccount = targetView === binding.scrollSettings
+        val isAccount = targetView === binding.tabAccount.root
         isAccountTabVisible.value = isAccount
         if (isAccount) {
             if (!alreadyVisible && resetAccountScrollToTop) {
-                binding.scrollSettings.scrollTo(0, 0)
+                binding.tabAccount.root.scrollTo(0, 0)
             }
-            if (lastRenderedLogText == null) {
-                renderDebugLogsUi(DebugLogRepository.entries.value, forceRender = true)
+            if (::tftLabsController.isInitialized && !tftLabsController.hasRenderedLogsOnce()) {
+                tftLabsController.renderCurrentLogsForce()
             }
-        } else if (fullscreenTftDialog?.isShowing != true) {
+        } else if (!::tftLabsController.isInitialized || !tftLabsController.isFullscreenShowing()) {
             val mirrorMgr = TftWifiMirrorManager.getInstance(this)
             if (mirrorMgr.isLocalPreviewActiveFlow.value) {
                 mirrorMgr.stopLocalDebugPreview()
             }
         }
 
-        if (targetView === binding.scrollFuel && fuelListThemeDirty && ::fuelLogManager.isInitialized) {
+        if (targetView === binding.tabFuel.root && fuelListThemeDirty && ::fuelLogManager.isInitialized) {
             fuelListThemeDirty = false
             updateFuelList(fuelLogManager.entries.value)
         }
@@ -742,19 +783,19 @@ class MainActivity : AppCompatActivity() {
             provideHapticFeedback()
             showEmergencyQuickActionsSheet()
         }
-        binding.btnRecalibrateCluster.setOnClickListener {
+        binding.tabCockpit.btnRecalibrateCluster.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
-        binding.layoutProjectedRange.setOnClickListener {
+        binding.tabCockpit.layoutProjectedRange.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
-        binding.layoutHomeOdometer.setOnClickListener {
+        binding.tabCockpit.layoutHomeOdometer.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
-        binding.btnEditOdo.setOnClickListener {
+        binding.tabAccount.btnEditOdo.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
@@ -768,7 +809,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateSyncTimeDisplay() {
         val syncMs = appSettings.lastSyncedTimestampMs
         if (syncMs <= 0L) {
-            binding.tvSyncTimeSubtext.text = "Not synced yet • Tap Recalibrate"
+            binding.tabCockpit.tvSyncTimeSubtext.text = "Not synced yet • Tap Recalibrate"
             return
         }
         val elapsedMinutes = ((System.currentTimeMillis() - syncMs) / (60 * 1000)).coerceAtLeast(0)
@@ -780,7 +821,7 @@ class MainActivity : AppCompatActivity() {
                 "Synced at ${sdf.format(Date(syncMs))}"
             }
         }
-        binding.tvSyncTimeSubtext.text = text
+        binding.tabCockpit.tvSyncTimeSubtext.text = text
     }
 
     private fun updateHeroRangeDisplay() {
@@ -792,31 +833,31 @@ class MainActivity : AppCompatActivity() {
         val reserveMax = model.reserveCapacityLiters
 
         if (dteKm <= 0 && fuelPercent <= 0) {
-            binding.tvProjectedRange.text = "--"
-            binding.tvDteSubtext.text = "Tap to sync"
-            binding.tvFuelLevelText.text = "0% Tank Level • 0.0L / ${formatDecimal(tankMax)}L"
-            binding.progressFuelLevel.progress = 0
+            binding.tabCockpit.tvProjectedRange.text = "--"
+            binding.tabCockpit.tvDteSubtext.text = "Tap to sync"
+            binding.tabCockpit.tvFuelLevelText.text = "0% Tank Level • 0.0L / ${formatDecimal(tankMax)}L"
+            binding.tabCockpit.progressFuelLevel.progress = 0
         } else {
-            binding.tvProjectedRange.text = if (dteKm > 0) dteKm.toString() else "--"
-            binding.tvDteSubtext.text = "~${formatDecimal(fuelLiters.toDouble())}L in tank"
-            binding.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${formatDecimal(fuelLiters.toDouble())}L / ${formatDecimal(tankMax)}L"
-            binding.progressFuelLevel.progress = fuelPercent
+            binding.tabCockpit.tvProjectedRange.text = if (dteKm > 0) dteKm.toString() else "--"
+            binding.tabCockpit.tvDteSubtext.text = "~${formatDecimal(fuelLiters.toDouble())}L in tank"
+            binding.tabCockpit.tvFuelLevelText.text = "${fuelPercent}% Tank Level • ${formatDecimal(fuelLiters.toDouble())}L / ${formatDecimal(tankMax)}L"
+            binding.tabCockpit.progressFuelLevel.progress = fuelPercent
         }
 
         // Unified Odometer & Mileage metrics across Home and Account tabs
         val totalOdo = maintenanceManager.status.value.totalOdometerKm
-        binding.tvHomeOdometer.text = formatDecimal(totalOdo)
-        binding.tvAccountOdometer.text = "${formatDecimal(totalOdo)} km"
+        binding.tabCockpit.tvHomeOdometer.text = formatDecimal(totalOdo)
+        binding.tabAccount.tvAccountOdometer.text = "${formatDecimal(totalOdo)} km"
 
         val fuelStats = fuelLogManager.stats.value
         if (fuelStats.averageKmpl > 0.0) {
-            binding.tvHomeMileage.text = "${formatDecimal(fuelStats.averageKmpl)} km/l avg"
+            binding.tabCockpit.tvHomeMileage.text = "${formatDecimal(fuelStats.averageKmpl)} km/l avg"
         } else {
-            binding.tvHomeMileage.text = "-- km/l"
+            binding.tabCockpit.tvHomeMileage.text = "-- km/l"
         }
 
-        binding.tvTankSpecs.text = "${formatDecimal(tankMax)}L Tank Capacity • ${formatDecimal(reserveMax)}L Res"
-        binding.tvTankReserveNote.text = "Reserve triggers below ${formatDecimal(reserveMax)}L"
+        binding.tabFuel.tvTankSpecs.text = "${formatDecimal(tankMax)}L Tank Capacity • ${formatDecimal(reserveMax)}L Res"
+        binding.tabCockpit.tvTankReserveNote.text = "Reserve triggers below ${formatDecimal(reserveMax)}L"
         updateSyncTimeDisplay()
     }
 
@@ -825,11 +866,11 @@ class MainActivity : AppCompatActivity() {
         val country = appSettings.getActiveCountryProfile()
         val localizedName = VehicleCatalog.getLocalizedBikeName(model, country)
 
-        binding.tvBikeName.text = localizedName
+        binding.tabAccount.tvBikeName.text = localizedName
         val reg = if (appSettings.bikeRegNumber.isNotBlank()) appSettings.bikeRegNumber else "Add Number Plate"
-        binding.tvBikeReg.text = "$reg • ${country.labelTag} ${country.name}"
-        binding.tvProfileName.text = appSettings.riderName.ifBlank { "Rider Profile" }
-        binding.tvTankSpecs.text = "${formatDecimal(model.tankCapacityLiters)}L Tank Capacity • ${formatDecimal(model.reserveCapacityLiters)}L Res"
+        binding.tabAccount.tvBikeReg.text = "$reg • ${country.labelTag} ${country.name}"
+        binding.tabAccount.tvProfileName.text = appSettings.riderName.ifBlank { "Rider Profile" }
+        binding.tabFuel.tvTankSpecs.text = "${formatDecimal(model.tankCapacityLiters)}L Tank Capacity • ${formatDecimal(model.reserveCapacityLiters)}L Res"
     }
 
     private fun updateDocumentsSummary() {
@@ -841,14 +882,14 @@ class MainActivity : AppCompatActivity() {
         val hasPuc = appSettings.docPucPath.isNotBlank() && File(appSettings.docPucPath).exists()
         val uploadedCount = listOf(hasRc, hasIns, hasPuc).count { it }
 
-        binding.tvDocumentsSubtext.text = if (appSettings.docRcNumber.isNotBlank() || uploadedCount > 0) {
+        binding.tabAccount.tvDocumentsSubtext.text = if (appSettings.docRcNumber.isNotBlank() || uploadedCount > 0) {
             "RC ($rc) • Ins ($ins) • PUC ($puc)"
         } else {
             "Upload RC, Insurance & PUC certificates"
         }
         val insStatus = GloveboxExpiryEvaluator.evaluate(hasIns, appSettings.docInsuranceExpiry)
         val pucStatus = GloveboxExpiryEvaluator.evaluate(hasPuc, appSettings.docPucExpiry)
-        binding.tvDocumentsBadge.text = when {
+        binding.tabAccount.tvDocumentsBadge.text = when {
             insStatus == GloveboxDocumentStatus.EXPIRED || pucStatus == GloveboxDocumentStatus.EXPIRED ->
                 "$uploadedCount • EXPIRED"
             insStatus == GloveboxDocumentStatus.EXPIRING_SOON || pucStatus == GloveboxDocumentStatus.EXPIRING_SOON ->
@@ -865,16 +906,16 @@ class MainActivity : AppCompatActivity() {
         val totalSpent = fuelSpent + serviceSpent
         val entries = fuelLogManager.entries.value
 
-        binding.tvTotalInvestment.text = "%s%.0f".format(currency, totalSpent)
-        binding.tvInvestmentSubtext.text = "%s%.0f Fuel • %s%.0f Service".format(currency, fuelSpent, currency, serviceSpent)
-        binding.tvFuelEntriesCount.text = "${entries.size} refill(s) logged"
+        binding.tabFuel.tvTotalInvestment.text = "%s%.0f".format(currency, totalSpent)
+        binding.tabFuel.tvInvestmentSubtext.text = "%s%.0f Fuel • %s%.0f Service".format(currency, fuelSpent, currency, serviceSpent)
+        binding.tabFuel.tvFuelEntriesCount.text = "${entries.size} refill(s) logged"
 
         val fuelRatio = if (totalSpent > 0.0) ((fuelSpent / totalSpent) * 100).toInt().coerceIn(0, 100) else 0
-        binding.progressFuelInvestment.progress = fuelRatio
-        binding.tvFuelRatioCaption.text = if (totalSpent > 0.0) {
+        binding.tabFuel.progressFuelInvestment.progress = fuelRatio
+        binding.tabFuel.tvFuelRatioCaption.text = if (totalSpent > 0.0) {
             "Fuel refills account for $fuelRatio% of total bike expenses"
         } else {
-            "Expense distribution across fuel refills and maintenance"
+            ""
         }
     }
 
@@ -884,30 +925,30 @@ class MainActivity : AppCompatActivity() {
         val currency = appSettings.currentCurrencySymbol
         val serviceInterval = MaintenanceManager.SERVICE_INTERVAL_KM
 
-        binding.tvSupportTotalInvested.text = String.format(Locale.US, "%s%.0f", currency, totalServiceSpent)
-        binding.tvSupportServiceRecordsCount.text = String.format(Locale.US, "%d service(s) logged", records.size)
+        binding.tabSupport.tvSupportTotalInvested.text = String.format(Locale.US, "%s%.0f", currency, totalServiceSpent)
+        binding.tabSupport.tvSupportServiceRecordsCount.text = String.format(Locale.US, "%d service(s) logged", records.size)
 
         val maint = maintenanceManager.status.value
         if (maint.isServiceOverdue) {
-            binding.tvSupportServiceRemaining.text = "OVERDUE"
-            binding.tvSupportServiceRemainingUnit.visibility = View.GONE
-            binding.tvSupportServiceRemaining.setTextColor(ContextCompat.getColor(this, R.color.status_disconnected))
-            binding.tvServiceHistorySummary.text = "Service Overdue • Immediate maintenance required"
-            binding.progressSupportService.progress = 100
-            binding.tvSupportHealthNote.text = "Schedule periodic service to maintain engine longevity"
+            binding.tabSupport.tvSupportServiceRemaining.text = "OVERDUE"
+            binding.tabSupport.tvSupportServiceRemainingUnit.visibility = View.GONE
+            binding.tabSupport.tvSupportServiceRemaining.setTextColor(ContextCompat.getColor(this, R.color.status_disconnected))
+            binding.tabSupport.tvServiceHistorySummary.text = "Service Overdue • Immediate maintenance required"
+            binding.tabSupport.progressSupportService.progress = 100
+            binding.tabSupport.tvSupportHealthNote.text = "Schedule periodic service to maintain engine longevity"
         } else {
-            binding.tvSupportServiceRemaining.text = String.format(Locale.US, "%.0f", maint.serviceRemainingKm.coerceAtLeast(0.0))
-            binding.tvSupportServiceRemainingUnit.visibility = View.VISIBLE
-            binding.tvSupportServiceRemaining.setTextColor(currentTheme.accentColor)
+            binding.tabSupport.tvSupportServiceRemaining.text = String.format(Locale.US, "%.0f", maint.serviceRemainingKm.coerceAtLeast(0.0))
+            binding.tabSupport.tvSupportServiceRemainingUnit.visibility = View.VISIBLE
+            binding.tabSupport.tvSupportServiceRemaining.setTextColor(currentTheme.accentColor)
 
             val serviceElapsed = (serviceInterval - maint.serviceRemainingKm.coerceIn(0.0, serviceInterval))
             val serviceProgress = ((serviceElapsed / serviceInterval) * 100).toInt().coerceIn(0, 100)
-            binding.progressSupportService.progress = serviceProgress
-            binding.tvServiceHistorySummary.text = "Periodic Service • $serviceProgress% of cycle elapsed"
-            binding.tvSupportHealthNote.text = String.format(Locale.US, "Next routine service due in %.0f km", maint.serviceRemainingKm.coerceAtLeast(0.0))
+            binding.tabSupport.progressSupportService.progress = serviceProgress
+            binding.tabSupport.tvServiceHistorySummary.text = "Periodic Service • $serviceProgress% of cycle elapsed"
+            binding.tabSupport.tvSupportHealthNote.text = String.format(Locale.US, "Next routine service due in %.0f km", maint.serviceRemainingKm.coerceAtLeast(0.0))
         }
-        binding.tvSupportChainRemaining.text = String.format(Locale.US, "Chain Lube: %.0f km left", maint.chainLubeRemainingKm.coerceAtLeast(0.0))
-        binding.tvSupportServiceStatusPill.text = String.format(Locale.US, "%,.0f km Cycle", serviceInterval)
+        binding.tabSupport.tvSupportChainRemaining.text = String.format(Locale.US, "Chain Lube: %.0f km left", maint.chainLubeRemainingKm.coerceAtLeast(0.0))
+        binding.tabSupport.tvSupportServiceStatusPill.text = String.format(Locale.US, "%,.0f km Cycle", serviceInterval)
 
         updateBikeInvestmentDisplay()
     }
@@ -1035,7 +1076,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         // BLE Scan / Disconnect Button
-        binding.btnScan.setOnClickListener {
+        binding.tabCockpit.btnScan.setOnClickListener {
             provideHapticFeedback()
             when (bleManager.connectionState.value) {
                 is BleConnectionState.Connected -> {
@@ -1048,11 +1089,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         // TFT Wi-Fi Full-Screen Mirroring Controls (NS400Z / Bajaj TFT)
-        binding.btnConfigureTftWifi.setOnClickListener {
+        binding.tabCockpit.btnConfigureTftWifi.setOnClickListener {
             provideHapticFeedback()
             showTftWifiConfigDialog()
         }
-        binding.btnToggleTftHudMirror.setOnClickListener {
+        binding.tabCockpit.btnToggleTftHudMirror.setOnClickListener {
             provideHapticFeedback()
             val wifiMgr = TftWifiMirrorManager.getInstance(this)
             val mirrorState = wifiMgr.mirrorState.value
@@ -1077,7 +1118,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        binding.btnCastLiveScreen.setOnClickListener {
+        binding.tabCockpit.btnCastLiveScreen.setOnClickListener {
             provideHapticFeedback()
             val mirrorState = TftWifiMirrorManager.getInstance(this).mirrorState.value
             if (mirrorState.source == TftMirrorSource.LIVE_SCREEN_CAST &&
@@ -1101,11 +1142,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Notification Access & Maps TBT Troubleshooting
-        binding.btnEnableNotificationAccess.setOnClickListener {
+        binding.tabCockpit.btnEnableNotificationAccess.setOnClickListener {
             provideHapticFeedback()
             openNotificationListenerSettings()
         }
-        binding.rowNotificationAccess.setOnClickListener {
+        binding.tabAccount.rowNotificationAccess.setOnClickListener {
             provideHapticFeedback()
             if (isNotificationAccessGranted()) {
                 showMapsTbtTroubleshooterDialog()
@@ -1113,44 +1154,44 @@ class MainActivity : AppCompatActivity() {
                 openNotificationListenerSettings()
             }
         }
-        binding.tvMapsTbtFixLink.setOnClickListener {
+        binding.tabAccount.tvMapsTbtFixLink.setOnClickListener {
             provideHapticFeedback()
             showMapsTbtTroubleshooterDialog()
         }
-        binding.rowBatteryOptimization.setOnClickListener {
+        binding.tabAccount.rowBatteryOptimization.setOnClickListener {
             provideHapticFeedback()
             requestIgnoreBatteryOptimization()
         }
 
         // Active TFT Live Navigation Dashboard Card
-        binding.cardActiveTftNavigation.setOnClickListener {
+        binding.tabCockpit.cardActiveTftNavigation.setOnClickListener {
             provideHapticFeedback()
             showNavigationHubBottomSheet()
         }
-        binding.btnActiveNavReroute.setOnClickListener {
+        binding.tabCockpit.btnActiveNavReroute.setOnClickListener {
             provideHapticFeedback()
             TftNavigationMapEngine.getInstance(this).triggerManualReroute()
             showFeedback("Recalculating route...")
         }
-        binding.btnActiveNavStop.setOnClickListener {
+        binding.tabCockpit.btnActiveNavStop.setOnClickListener {
             provideHapticFeedback()
             TftNavigationMapEngine.getInstance(this).clearActiveRoute()
             showFeedback("PulsarNav Live Map route cleared")
         }
 
         // Search Bar click -> Built-in Lock-Proof TFT Route OR Google Maps
-        binding.layoutSearchBar.setOnClickListener {
+        binding.tabCockpit.layoutSearchBar.setOnClickListener {
             provideHapticFeedback()
             showNavigationHubBottomSheet()
         }
 
         // Quick Nearby Fuel on Fuel Tab
-        binding.btnFindPumps.setOnClickListener {
+        binding.tabFuel.btnFindPumps.setOnClickListener {
             launchNearbyFuelPumps()
         }
 
         // Turn simulation test bench (Continuous ~800ms stream to motorcycle cluster)
-        binding.btnTestLeft.setOnClickListener {
+        binding.tabAccount.btnTestLeft.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_LEFT) {
                 bleManager.stopSimulation()
@@ -1161,7 +1202,7 @@ class MainActivity : AppCompatActivity() {
                 showFeedback("Simulating Left Turn on Cluster (~800ms stream)")
             }
         }
-        binding.btnTestStraight.setOnClickListener {
+        binding.tabAccount.btnTestStraight.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.STRAIGHT) {
                 bleManager.stopSimulation()
@@ -1172,7 +1213,7 @@ class MainActivity : AppCompatActivity() {
                 showFeedback("Simulating Straight on Cluster (~800ms stream)")
             }
         }
-        binding.btnTestRight.setOnClickListener {
+        binding.tabAccount.btnTestRight.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && bleManager.currentActiveManeuver.value == Maneuver.TURN_RIGHT) {
                 bleManager.stopSimulation()
@@ -1183,44 +1224,44 @@ class MainActivity : AppCompatActivity() {
                 showFeedback("Simulating Right Turn on Cluster (~800ms stream)")
             }
         }
-        binding.btnTestRoundabout.setOnClickListener {
+        binding.tabAccount.btnTestRoundabout.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isSimulationRunning.value && (bleManager.currentActiveManeuver.value == Maneuver.ROUNDABOUT_LEFT || bleManager.currentActiveManeuver.value == Maneuver.ROUNDABOUT_RIGHT)) {
                 if (roundaboutTestState == 1) {
                     roundaboutTestState = 2
                     bleManager.startSimulation(Maneuver.ROUNDABOUT_LEFT, 200, "Exit 2 • Ring Road", roundaboutExit = 2)
                     updateNavDisplay(Maneuver.ROUNDABOUT_LEFT, "200 m", "Exit 2 • Ring Road", "7 min ETA")
-                    binding.btnTestRoundabout.text = "↺  Testing Exit 2 (Tap to Stop)"
+                    binding.tabAccount.btnTestRoundabout.text = "Testing Exit 2 (Tap to Stop)"
                     showFeedback("Simulating Roundabout Exit 2 (OTC byte 7 = 0x02)")
                 } else {
                     roundaboutTestState = 0
                     bleManager.stopSimulation()
-                    binding.btnTestRoundabout.text = "↺  Test Roundabout (Safe / Exit 2)"
+                    binding.tabAccount.btnTestRoundabout.text = "Test Roundabout"
                     showFeedback("Roundabout simulation stopped")
                 }
             } else {
                 roundaboutTestState = 1
                 bleManager.startSimulation(Maneuver.ROUNDABOUT_LEFT, 200, "Roundabout • Ring Road", roundaboutExit = 0)
                 updateNavDisplay(Maneuver.ROUNDABOUT_LEFT, "200 m", "Roundabout • Ring Road", "7 min ETA")
-                binding.btnTestRoundabout.text = "↺  Testing Safe Exit 0 (Tap for Exit 2)"
+                binding.tabAccount.btnTestRoundabout.text = "Testing Safe Exit 0 (Tap for Exit 2)"
                 showFeedback("Simulating Safe Roundabout (Exit 0: No exit number misdirection)")
             }
         }
-        binding.btnStopSimulation.setOnClickListener {
+        binding.tabAccount.btnStopSimulation.setOnClickListener {
             provideHapticFeedback()
             roundaboutTestState = 0
-            binding.btnTestRoundabout.text = "↺  Test Roundabout (Safe / Exit 2)"
+            binding.tabAccount.btnTestRoundabout.text = "Test Roundabout"
             bleManager.stopSimulation()
             bleManager.stopNavigation()
-            binding.tvDistance.text = "-- m"
-            binding.tvStreetName.text = "Navigation stopped"
-            binding.tvManeuverIcon.text = "⏹"
-            binding.tvEtaBadge.text = "Idle"
+            binding.tabAccount.tvDistance.text = "-- m"
+            binding.tabAccount.tvStreetName.text = "Navigation stopped"
+            binding.tabAccount.tvManeuverIcon.text = "⏹"
+            binding.tabAccount.tvEtaBadge.text = "Idle"
             showFeedback("Simulation Stopped & Cluster Cleared")
         }
 
         // Call & WhatsApp simulation
-        binding.btnSimulateCall.setOnClickListener {
+        binding.tabAccount.btnSimulateCall.setOnClickListener {
             provideHapticFeedback()
             if (callManager.callInfo.value.state == CallState.NO_CALL) {
                 callManager.simulateIncomingCall("Dad (Mobile)", "+91 98765 43210")
@@ -1231,31 +1272,31 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnSimulateWhatsApp.setOnClickListener {
+        binding.tabAccount.btnSimulateWhatsApp.setOnClickListener {
             provideHapticFeedback()
             val sampleSender = "Rahul Sharma"
             bleManager.sendWhatsAppAlert(sampleSender, com.pulsarnav.app.protocol.AlertType.WHATSAPP)
-            binding.tvWhatsAppAlertBanner.text = "WhatsApp Alert: $sampleSender (Showing 6s)"
-            binding.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
+            binding.tabAccount.tvWhatsAppAlertBanner.text = "WhatsApp Alert: $sampleSender (Showing 6s)"
+            binding.tabAccount.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
             showFeedback("WhatsApp alert sent to cluster (6s preview)")
         }
 
-        binding.btnSimulateSms.setOnClickListener {
+        binding.tabAccount.btnSimulateSms.setOnClickListener {
             provideHapticFeedback()
             val sampleSender = "Vikram (+91 98765)"
             bleManager.sendWhatsAppAlert(sampleSender, com.pulsarnav.app.protocol.AlertType.SMS)
-            binding.tvWhatsAppAlertBanner.text = "SMS Alert: $sampleSender (Showing 6s)"
-            binding.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
+            binding.tabAccount.tvWhatsAppAlertBanner.text = "SMS Alert: $sampleSender (Showing 6s)"
+            binding.tabAccount.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
             showFeedback("SMS alert (0410 type=1) sent to cluster (6s preview)")
         }
 
-        binding.btnSimulateMissedCall.setOnClickListener {
+        binding.tabAccount.btnSimulateMissedCall.setOnClickListener {
             provideHapticFeedback()
             callManager.simulateMissedCall("Mom", "+91 98765 12345")
             showFeedback("Simulating Missed Call Alert on Cluster")
         }
 
-        binding.btnSyncPhonebookCalls.setOnClickListener {
+        binding.tabAccount.btnSyncPhonebookCalls.setOnClickListener {
             provideHapticFeedback()
             if (bleManager.isConnectedToTftCluster()) {
                 bleManager.syncPhonebookAndCalls()
@@ -1266,19 +1307,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnGrantTelephonyPerms.setOnClickListener {
+        binding.tabAccount.btnGrantTelephonyPerms.setOnClickListener {
             provideHapticFeedback()
             requestTelephonyAndClusterPermissions()
         }
 
         // Edit Odometer
-        binding.btnEditOdo.setOnClickListener {
+        binding.tabAccount.btnEditOdo.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
 
         // Mark Chain Lubed
-        binding.btnMarkChainLubed.setOnClickListener {
+        binding.tabSupport.btnMarkChainLubed.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markChainLubed()
             recordSyncTime()
@@ -1286,7 +1327,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Mark Serviced
-        binding.btnMarkServiced.setOnClickListener {
+        binding.tabSupport.btnMarkServiced.setOnClickListener {
             provideHapticFeedback()
             maintenanceManager.markServiceDone()
             recordSyncTime()
@@ -1295,33 +1336,33 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Add Refuel Entry
-        binding.btnAddFuel.setOnClickListener {
+        binding.tabFuel.btnAddFuel.setOnClickListener {
             provideHapticFeedback()
             showAddFuelDialog()
         }
-        binding.btnFuelAction.setOnClickListener {
+        binding.tabFuel.btnFuelAction.setOnClickListener {
             provideHapticFeedback()
             showAddFuelDialog()
         }
-        binding.layoutFuelInvestment.setOnClickListener {
+        binding.tabFuel.layoutFuelInvestment.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
         }
-        binding.layoutFuelMileage.setOnClickListener {
+        binding.tabFuel.layoutFuelMileage.setOnClickListener {
             provideHapticFeedback()
             showClusterRecalibrateBottomSheet()
         }
 
 
         // Emergency & Medical Assistance
-        binding.btnEmergencyHospitals.setOnClickListener {
+        binding.tabCockpit.btnEmergencyHospitals.setOnClickListener {
             launchEmergencyHospitals()
         }
-        binding.btnEmergencyAmbulance.setOnClickListener {
+        binding.tabCockpit.btnEmergencyAmbulance.setOnClickListener {
             provideHapticFeedback()
             showEmergencyQuickActionsSheet()
         }
-        binding.layoutEmergencyRiderInfo.setOnClickListener {
+        binding.tabCockpit.layoutEmergencyRiderInfo.setOnClickListener {
             showEmergencyMedicalDialog()
         }
     }
@@ -1423,58 +1464,58 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSupportAndAccountDialogs() {
         // Service History Dialog (Editable)
-        binding.cardServiceHistory.setOnClickListener {
+        binding.tabSupport.cardServiceHistory.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
         }
-        binding.tvServiceHistoryAction.setOnClickListener {
+        binding.tabSupport.tvServiceHistoryAction.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
         }
-        binding.layoutSupportSpent.setOnClickListener {
+        binding.tabSupport.layoutSupportSpent.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
         }
-        binding.layoutSupportNextService.setOnClickListener {
+        binding.tabSupport.layoutSupportNextService.setOnClickListener {
             provideHapticFeedback()
             showServiceHistoryDialog()
         }
 
         // Roadside Assistance Dialog (24x7)
-        binding.rowRsa.setOnClickListener {
+        binding.tabSupport.rowRsa.setOnClickListener {
             provideHapticFeedback()
             showRsaDialog()
         }
 
         // Vehicle Manual & NS200 Specs
-        binding.rowManual.setOnClickListener {
+        binding.tabSupport.rowManual.setOnClickListener {
             provideHapticFeedback()
             showManualDialog()
         }
 
         // Support Issue Button
-        binding.btnSupportIssue.setOnClickListener {
+        binding.tabSupport.btnSupportIssue.setOnClickListener {
             provideHapticFeedback()
             showSupportIssueDialog()
         }
 
 
         // Digital Glovebox Documents & Uploads
-        binding.rowDocuments.setOnClickListener {
+        binding.tabAccount.rowDocuments.setOnClickListener {
             provideHapticFeedback()
             showDocumentsDialog()
         }
 
         // Edit Motorcycle Info
-        binding.cardMyBike.setOnClickListener {
+        binding.tabAccount.cardMyBike.setOnClickListener {
             provideHapticFeedback()
             showEditBikeInfoDialog()
         }
-        binding.btnEditBikeInfo.setOnClickListener {
+        binding.tabAccount.btnEditBikeInfo.setOnClickListener {
             provideHapticFeedback()
             showEditBikeInfoDialog()
         }
-        binding.btnSetupBikeModel.setOnClickListener {
+        binding.tabAccount.btnSetupBikeModel.setOnClickListener {
             provideHapticFeedback()
             showVehicleSetupBottomSheet()
         }
@@ -1508,48 +1549,48 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Bike Issues Checklist Card
-        binding.cardBikeIssues.setOnClickListener {
+        binding.tabSupport.cardBikeIssues.setOnClickListener {
             provideHapticFeedback()
             showBikeIssuesChecklistDialog()
         }
 
         // Service Target / Milestone Schedule
-        binding.btnSetServiceTarget.setOnClickListener {
+        binding.tabSupport.btnSetServiceTarget.setOnClickListener {
             provideHapticFeedback()
             showServiceTargetDialog()
         }
 
         // Fuel Price Setting Card Row
-        binding.rowFuelPriceSetting.setOnClickListener {
+        binding.tabFuel.rowFuelPriceSetting.setOnClickListener {
             provideHapticFeedback()
             showEditPetrolPriceDialog()
         }
 
         // Edit Rider Profile
-        binding.cardProfile.setOnClickListener {
+        binding.tabAccount.cardProfile.setOnClickListener {
             provideHapticFeedback()
             showEditRiderProfileDialog()
         }
 
         // Data Vault & Phone Migration
-        binding.rowVaultQr.setOnClickListener {
+        binding.tabAccount.rowVaultQr.setOnClickListener {
             provideHapticFeedback()
             showDataVaultBottomSheet(openQrDirectly = true)
         }
-        binding.rowVaultBackup.setOnClickListener {
+        binding.tabAccount.rowVaultBackup.setOnClickListener {
             provideHapticFeedback()
             showDataVaultBottomSheet(openQrDirectly = false)
         }
 
         // Navigation Provider Preference in Account Tab
-        binding.btnNavChooseGmaps.setOnClickListener {
+        binding.tabAccount.btnNavChooseGmaps.setOnClickListener {
             provideHapticFeedback()
             appSettings.preferredNavApp = AppSettings.NAV_APP_GOOGLE_MAPS
             updateNavAppSelectionUi()
             updateQuickNavButtons()
             showFeedback("Default navigation app set to Google Maps")
         }
-        binding.btnNavChooseWaze.setOnClickListener {
+        binding.tabAccount.btnNavChooseWaze.setOnClickListener {
             provideHapticFeedback()
             appSettings.preferredNavApp = AppSettings.NAV_APP_WAZE
             updateNavAppSelectionUi()
@@ -2221,388 +2262,10 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun showDocumentsDialog() {
-        val sheet = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
-        val view = layoutInflater.inflate(R.layout.bottom_sheet_digital_glovebox, null)
-        sheet.setContentView(view)
+    private fun showDocumentsDialog() = gloveboxController.show()
 
-        activeGloveboxSheet = sheet
-        activeGloveboxView = view
-        sheet.setOnDismissListener {
-            activeGloveboxSheet = null
-            activeGloveboxView = null
-        }
+    private fun saveUploadedDocument(uri: Uri, docType: String?) = gloveboxController.saveUploadedDocument(uri, docType)
 
-        bindGloveboxData(view, sheet)
-        sheet.show()
-    }
-
-    private fun bindGloveboxData(view: View, sheet: BottomSheetDialog) {
-        // --- RC Document ---
-        val rcNumber = appSettings.docRcNumber.ifBlank { "Not set" }
-        val hasRcFile = appSettings.docRcPath.isNotBlank() && File(appSettings.docRcPath).exists()
-        val rcFileName = if (hasRcFile) File(appSettings.docRcPath).name else "No document attached"
-
-        view.findViewById<TextView>(R.id.tvRcNumber)?.text = rcNumber
-        view.findViewById<TextView>(R.id.tvRcFileName)?.text = rcFileName
-        view.findViewById<TextView>(R.id.badgeRcStatus)?.apply {
-            if (hasRcFile) {
-                text = "ATTACHED"
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
-                backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.status_connected_subtle))
-            } else {
-                text = "NO FILE"
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_tertiary))
-                backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.surface_elevated))
-            }
-        }
-        view.findViewById<View>(R.id.btnViewRc)?.apply {
-            isEnabled = hasRcFile
-            alpha = if (hasRcFile) 1.0f else 0.4f
-            setOnClickListener {
-                if (hasRcFile) {
-                    provideHapticFeedback()
-                    viewDocument(appSettings.docRcPath, "Registration Certificate (RC)")
-                }
-            }
-        }
-        view.findViewById<View>(R.id.btnUploadRc)?.setOnClickListener {
-            provideHapticFeedback()
-            pendingDocType = "rc"
-            try {
-                documentPicker.launch(arrayOf("image/*", "application/pdf"))
-            } catch (e: Exception) {
-                showFeedback("Could not open file picker: ${e.message}", isAlert = true)
-            }
-        }
-        view.findViewById<View>(R.id.btnEditRc)?.setOnClickListener {
-            provideHapticFeedback()
-            showEditDocumentDetailsDialog("rc", "Registration Certificate (RC)", appSettings.docRcNumber, null)
-        }
-
-        // --- Insurance Document ---
-        val insPolicy = appSettings.docInsurancePolicy.ifBlank { "Not set" }
-        val insExpiry = appSettings.docInsuranceExpiry.ifBlank { "Expiry not set" }
-        val hasInsFile = appSettings.docInsurancePath.isNotBlank() && File(appSettings.docInsurancePath).exists()
-
-        view.findViewById<TextView>(R.id.tvInsurancePolicy)?.text = insPolicy
-        view.findViewById<TextView>(R.id.tvInsuranceExpiry)?.text = insExpiry
-        applyGloveboxStatusBadge(
-            badge = view.findViewById(R.id.badgeInsuranceStatus),
-            hasFile = hasInsFile,
-            rawExpiry = appSettings.docInsuranceExpiry,
-            validLabel = "ACTIVE"
-        )
-        view.findViewById<View>(R.id.btnViewInsurance)?.apply {
-            isEnabled = hasInsFile
-            alpha = if (hasInsFile) 1.0f else 0.4f
-            setOnClickListener {
-                if (hasInsFile) {
-                    provideHapticFeedback()
-                    viewDocument(appSettings.docInsurancePath, "Comprehensive Insurance")
-                }
-            }
-        }
-        view.findViewById<View>(R.id.btnUploadInsurance)?.setOnClickListener {
-            provideHapticFeedback()
-            pendingDocType = "insurance"
-            try {
-                documentPicker.launch(arrayOf("image/*", "application/pdf"))
-            } catch (e: Exception) {
-                showFeedback("Could not open file picker: ${e.message}", isAlert = true)
-            }
-        }
-        view.findViewById<View>(R.id.btnEditInsurance)?.setOnClickListener {
-            provideHapticFeedback()
-            showEditDocumentDetailsDialog("insurance", "Comprehensive Insurance", appSettings.docInsurancePolicy, appSettings.docInsuranceExpiry)
-        }
-
-        // --- PUC Document ---
-        val pucCert = appSettings.docPucCert.ifBlank { "Not set" }
-        val pucExpiry = appSettings.docPucExpiry.ifBlank { "Expiry not set" }
-        val hasPucFile = appSettings.docPucPath.isNotBlank() && File(appSettings.docPucPath).exists()
-
-        view.findViewById<TextView>(R.id.tvPucNumber)?.text = pucCert
-        view.findViewById<TextView>(R.id.tvPucExpiry)?.text = pucExpiry
-        applyGloveboxStatusBadge(
-            badge = view.findViewById(R.id.badgePucStatus),
-            hasFile = hasPucFile,
-            rawExpiry = appSettings.docPucExpiry,
-            validLabel = "VALID"
-        )
-        view.findViewById<View>(R.id.btnViewPuc)?.apply {
-            isEnabled = hasPucFile
-            alpha = if (hasPucFile) 1.0f else 0.4f
-            setOnClickListener {
-                if (hasPucFile) {
-                    provideHapticFeedback()
-                    viewDocument(appSettings.docPucPath, "Pollution Certificate (PUC)")
-                }
-            }
-        }
-        view.findViewById<View>(R.id.btnUploadPuc)?.setOnClickListener {
-            provideHapticFeedback()
-            pendingDocType = "puc"
-            try {
-                documentPicker.launch(arrayOf("image/*", "application/pdf"))
-            } catch (e: Exception) {
-                showFeedback("Could not open file picker: ${e.message}", isAlert = true)
-            }
-        }
-        view.findViewById<View>(R.id.btnEditPuc)?.setOnClickListener {
-            provideHapticFeedback()
-            showEditDocumentDetailsDialog("puc", "Pollution Under Control (PUC)", appSettings.docPucCert, appSettings.docPucExpiry)
-        }
-
-        // Apply theme to glovebox cards and action buttons
-        val docCards = listOf(
-            view.findViewById<MaterialCardView>(R.id.cardGloveboxRc),
-            view.findViewById<MaterialCardView>(R.id.cardGloveboxInsurance),
-            view.findViewById<MaterialCardView>(R.id.cardGloveboxPuc)
-        )
-        for (c in docCards) {
-            c?.setCardBackgroundColor(currentTheme.cardColor)
-            c?.strokeColor = currentTheme.cardBorderColor
-        }
-        val actionButtons = listOf(
-            view.findViewById<MaterialButton>(R.id.btnViewRc),
-            view.findViewById<MaterialButton>(R.id.btnViewInsurance),
-            view.findViewById<MaterialButton>(R.id.btnViewPuc)
-        )
-        for (btn in actionButtons) {
-            btn?.setTextColor(currentTheme.accentColor)
-            btn?.iconTint = ColorStateList.valueOf(currentTheme.accentColor)
-            btn?.strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
-        }
-        val secondaryButtons = listOf(
-            view.findViewById<MaterialButton>(R.id.btnUploadRc),
-            view.findViewById<MaterialButton>(R.id.btnUploadInsurance),
-            view.findViewById<MaterialButton>(R.id.btnUploadPuc),
-            view.findViewById<MaterialButton>(R.id.btnEditRc),
-            view.findViewById<MaterialButton>(R.id.btnEditInsurance),
-            view.findViewById<MaterialButton>(R.id.btnEditPuc)
-        )
-        for (btn in secondaryButtons) {
-            btn?.strokeColor = ColorStateList.valueOf(currentTheme.cardBorderColor)
-        }
-        view.findViewById<MaterialButton>(R.id.btnGloveboxClose)?.apply {
-            backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
-            setTextColor(currentTheme.onPrimaryColor)
-        }
-
-        view.findViewById<View>(R.id.btnGloveboxClose)?.setOnClickListener {
-            sheet.dismiss()
-        }
-    }
-
-    private fun showEditDocumentDetailsDialog(
-        docType: String,
-        title: String,
-        currentNum: String,
-        currentExpiry: String?
-    ) {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 10)
-        }
-
-        val tvNumLabel = TextView(this).apply {
-            text = if (docType == "insurance") "Policy Name / Number:" else "Document / Plate Number:"
-            setTextColor(currentTheme.textPrimaryColor)
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-        layout.addView(tvNumLabel)
-
-        val etNum = createThemedEditText(initialText = currentNum.ifBlank { numberOrPolicy(docType) })
-        layout.addView(etNum)
-
-        val etExpiry = if (expiryRequired(docType)) {
-            val tvExpLabel = TextView(this).apply {
-                text = "\nExpiry Date:"
-                setTextColor(currentTheme.textPrimaryColor)
-                textSize = 13f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-            }
-            layout.addView(tvExpLabel)
-
-            val et = createThemedEditText(hintText = "e.g. 15 Nov 2027", initialText = currentExpiry ?: "")
-            layout.addView(et)
-
-            val btnPickExpiry = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                text = "Pick Date from Calendar"
-                textSize = 12f
-                setTextColor(currentTheme.accentColor)
-                strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
-                setOnClickListener {
-                    provideHapticFeedback()
-                    val cal = Calendar.getInstance()
-                    GloveboxExpiryEvaluator.parseExpiryDate(et.text.toString())?.let { existingDate ->
-                        cal.set(existingDate.year, existingDate.monthValue - 1, existingDate.dayOfMonth)
-                    }
-                    DatePickerDialog(
-                        this@MainActivity,
-                        { _, y, m, d ->
-                            cal.set(y, m, d)
-                            et.setText(SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH).format(cal.time))
-                        },
-                        cal.get(Calendar.YEAR),
-                        cal.get(Calendar.MONTH),
-                        cal.get(Calendar.DAY_OF_MONTH)
-                    ).show()
-                }
-            }
-            layout.addView(btnPickExpiry)
-            et
-        } else null
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Edit $title")
-            .setView(layout)
-            .setPositiveButton("Save") { _, _ ->
-                val newNum = etNum.text.toString().trim()
-                val newExp = etExpiry?.text?.toString()?.trim()
-
-                when (docType) {
-                    "rc" -> {
-                        if (newNum.isNotBlank()) {
-                            appSettings.docRcNumber = newNum
-                            appSettings.bikeRegNumber = newNum
-                        }
-                    }
-                    "insurance" -> {
-                        if (newNum.isNotBlank()) appSettings.docInsurancePolicy = newNum
-                        if (newExp != null) appSettings.docInsuranceExpiry = newExp
-                    }
-                    "puc" -> {
-                        if (newNum.isNotBlank()) appSettings.docPucCert = newNum
-                        if (newExp != null) appSettings.docPucExpiry = newExp
-                    }
-                }
-
-                updateDocumentsSummary()
-                updateBikeInfoDisplay()
-                recordSyncTime()
-                activeGloveboxView?.let { v -> activeGloveboxSheet?.let { s -> bindGloveboxData(v, s) } }
-                showFeedback("$title updated!")
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun applyGloveboxStatusBadge(
-        badge: TextView?,
-        hasFile: Boolean,
-        rawExpiry: String?,
-        validLabel: String
-    ) {
-        badge ?: return
-        val status = GloveboxExpiryEvaluator.evaluate(hasFile, rawExpiry)
-        val (label, textColorRes, bgColorRes) = when (status) {
-            GloveboxDocumentStatus.VALID ->
-                Triple(validLabel, R.color.status_connected, R.color.status_connected_subtle)
-            GloveboxDocumentStatus.EXPIRING_SOON ->
-                Triple("EXPIRING", R.color.status_scanning, R.color.status_scanning_subtle)
-            GloveboxDocumentStatus.EXPIRED ->
-                Triple("EXPIRED", R.color.status_disconnected, R.color.status_disconnected_subtle)
-            GloveboxDocumentStatus.ATTACHED_NO_EXPIRY ->
-                Triple("ATTACHED", R.color.text_secondary, R.color.surface_elevated)
-            GloveboxDocumentStatus.NO_FILE ->
-                Triple("NO FILE", R.color.text_tertiary, R.color.surface_elevated)
-        }
-        badge.text = label
-        badge.setTextColor(ContextCompat.getColor(this, textColorRes))
-        badge.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, bgColorRes))
-    }
-
-    private fun numberOrPolicy(docType: String): String {
-        return when (docType) {
-            "rc" -> appSettings.docRcNumber
-            "insurance" -> appSettings.docInsurancePolicy
-            else -> appSettings.docPucCert
-        }
-    }
-
-    private fun expiryRequired(docType: String): Boolean {
-        return docType == "insurance" || docType == "puc"
-    }
-
-    private fun saveUploadedDocument(uri: Uri, docType: String?) {
-        if (docType == null) return
-        var targetFile: File? = null
-        try {
-            val mime = contentResolver.getType(uri) ?: "application/octet-stream"
-            val mappedExt = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
-            val extension = when {
-                !mappedExt.isNullOrBlank() && mappedExt.length <= 5 -> mappedExt.lowercase(Locale.US)
-                mime.contains("pdf", ignoreCase = true) -> "pdf"
-                mime.contains("png", ignoreCase = true) -> "png"
-                mime.contains("webp", ignoreCase = true) -> "webp"
-                else -> "jpg"
-            }
-            val docsDir = File(filesDir, "documents").apply { mkdirs() }
-            val createdFile = File(docsDir, "${docType}_${System.currentTimeMillis()}.$extension")
-            targetFile = createdFile
-
-            val input = contentResolver.openInputStream(uri)
-                ?: throw java.io.IOException("Unable to read selected document")
-            input.use { stream ->
-                createdFile.outputStream().use { output ->
-                    stream.copyTo(output)
-                }
-            }
-
-            val oldPath = when (docType) {
-                "rc" -> appSettings.docRcPath.also { appSettings.docRcPath = createdFile.absolutePath }
-                "insurance" -> appSettings.docInsurancePath.also { appSettings.docInsurancePath = createdFile.absolutePath }
-                "puc" -> appSettings.docPucPath.also { appSettings.docPucPath = createdFile.absolutePath }
-                else -> null
-            }
-
-            if (!oldPath.isNullOrBlank() && oldPath != createdFile.absolutePath) {
-                File(oldPath).takeIf { it.exists() }?.delete()
-            }
-
-            recordSyncTime()
-            updateDocumentsSummary()
-            activeGloveboxView?.let { v -> activeGloveboxSheet?.let { s -> bindGloveboxData(v, s) } }
-            provideHapticFeedback()
-            showFeedback("Document uploaded successfully!")
-        } catch (e: Exception) {
-            targetFile?.takeIf { it.exists() }?.delete()
-            showFeedback("Failed to upload document: ${e.message}", isAlert = true)
-        }
-    }
-
-    private fun viewDocument(path: String, title: String) {
-        val file = File(path)
-        if (!file.exists()) {
-            showFeedback("Document file not found on device", isAlert = true)
-            return
-        }
-
-        try {
-            val fileUri: Uri = androidx.core.content.FileProvider.getUriForFile(
-                this,
-                "${applicationContext.packageName}.fileprovider",
-                file
-            )
-
-            val mimeType = if (file.name.endsWith(".pdf", ignoreCase = true)) {
-                "application/pdf"
-            } else {
-                "image/*"
-            }
-
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(intent, "View $title"))
-        } catch (e: Exception) {
-            showFeedback("Could not open document viewer: ${e.message}", isAlert = true)
-        }
-    }
 
     private fun showRsaDialog() {
         val country = appSettings.getActiveCountryProfile()
@@ -2688,81 +2351,81 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupFeatureToggles() {
         // Auto-Connect Switch
-        binding.switchAutoConnect.isChecked = bleManager.isAutoConnectEnabled
-        binding.switchAutoConnect.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchAutoConnect.isChecked = bleManager.isAutoConnectEnabled
+        binding.tabAccount.switchAutoConnect.setOnCheckedChangeListener { _, isChecked ->
             bleManager.isAutoConnectEnabled = isChecked
             if (isChecked) {
                 checkAndStartScan(silent = true)
             }
         }
-        binding.rowAutoConnect.setOnClickListener {
+        binding.tabAccount.rowAutoConnect.setOnClickListener {
             provideHapticFeedback()
-            binding.switchAutoConnect.toggle()
+            binding.tabAccount.switchAutoConnect.toggle()
         }
 
         // Two-Wheeler Mode Switch
-        binding.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
-        binding.switchTwoWheeler.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
+        binding.tabAccount.switchTwoWheeler.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTwoWheelerMode = isChecked
         }
-        binding.rowTwoWheeler.setOnClickListener {
+        binding.tabAccount.rowTwoWheeler.setOnClickListener {
             provideHapticFeedback()
-            binding.switchTwoWheeler.toggle()
+            binding.tabAccount.switchTwoWheeler.toggle()
         }
 
         // Auto Park Switch
-        binding.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
-        binding.switchAutoPark.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
+        binding.tabAccount.switchAutoPark.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isAutoParkEnabled = isChecked
         }
-        binding.rowAutoPark.setOnClickListener {
+        binding.tabAccount.rowAutoPark.setOnClickListener {
             provideHapticFeedback()
-            binding.switchAutoPark.toggle()
+            binding.tabAccount.switchAutoPark.toggle()
         }
 
         // Ride Tracking Switch
-        binding.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
-        binding.switchRideTracking.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
+        binding.tabAccount.switchRideTracking.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isRideTrackingEnabled = isChecked
         }
-        binding.rowRideTracking.setOnClickListener {
+        binding.tabAccount.rowRideTracking.setOnClickListener {
             provideHapticFeedback()
-            binding.switchRideTracking.toggle()
+            binding.tabAccount.switchRideTracking.toggle()
         }
 
         // Media Control Switch
-        binding.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
-        binding.switchMediaControl.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
+        binding.tabAccount.switchMediaControl.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isMediaControlEnabled = isChecked
         }
-        binding.rowMediaControl.setOnClickListener {
+        binding.tabAccount.rowMediaControl.setOnClickListener {
             provideHapticFeedback()
-            binding.switchMediaControl.toggle()
+            binding.tabAccount.switchMediaControl.toggle()
         }
 
         // WhatsApp Alerts Switch
-        binding.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
-        binding.switchWhatsAppAlerts.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
+        binding.tabAccount.switchWhatsAppAlerts.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isWhatsAppAlertsEnabled = isChecked
         }
-        binding.rowWhatsAppAlerts.setOnClickListener {
+        binding.tabAccount.rowWhatsAppAlerts.setOnClickListener {
             provideHapticFeedback()
-            binding.switchWhatsAppAlerts.toggle()
+            binding.tabAccount.switchWhatsAppAlerts.toggle()
         }
 
         // Telemetry Switch
-        binding.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
-        binding.switchTelemetry.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
+        binding.tabAccount.switchTelemetry.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isTelemetrySyncEnabled = isChecked
         }
-        binding.rowTelemetry.setOnClickListener {
+        binding.tabAccount.rowTelemetry.setOnClickListener {
             provideHapticFeedback()
-            binding.switchTelemetry.toggle()
+            binding.tabAccount.switchTelemetry.toggle()
         }
 
         // Headunit Cluster Skip Switch
-        binding.switchSkipHeadunitNav.isChecked = appSettings.isSkipClusterNavWhenHeadunit
-        binding.switchSkipHeadunitNav.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchSkipHeadunitNav.isChecked = appSettings.isSkipClusterNavWhenHeadunit
+        binding.tabAccount.switchSkipHeadunitNav.setOnCheckedChangeListener { _, isChecked ->
             provideHapticFeedback()
             appSettings.isSkipClusterNavWhenHeadunit = isChecked
             showFeedback(
@@ -2770,31 +2433,31 @@ class MainActivity : AppCompatActivity() {
                 else "Cluster Nav mirror mode: active (Cluster + Headunit)"
             )
         }
-        binding.rowSkipHeadunitNav.setOnClickListener {
+        binding.tabAccount.rowSkipHeadunitNav.setOnClickListener {
             provideHapticFeedback()
-            binding.switchSkipHeadunitNav.toggle()
+            binding.tabAccount.switchSkipHeadunitNav.toggle()
         }
 
         // Reject-with-SMS Auto-Reply Switch & Template
         updateSmsRejectUi()
-        binding.switchSmsReject.setOnCheckedChangeListener { _, isChecked ->
+        binding.tabAccount.switchSmsReject.setOnCheckedChangeListener { _, isChecked ->
             appSettings.isSmsRejectEnabled = isChecked
             updateSmsRejectUi()
             if (isChecked && ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
                 showFeedback("Grant SEND_SMS permission in Settings to auto-reply from switchgear", isAlert = true)
             }
         }
-        binding.rowSmsReject.setOnClickListener {
+        binding.tabAccount.rowSmsReject.setOnClickListener {
             provideHapticFeedback()
-            binding.switchSmsReject.toggle()
+            binding.tabAccount.switchSmsReject.toggle()
         }
-        binding.btnEditSmsRejectMsg.setOnClickListener {
+        binding.tabAccount.btnEditSmsRejectMsg.setOnClickListener {
             provideHapticFeedback()
             showEditSmsRejectTemplateDialog()
         }
 
         // Cluster Phonebook, Call Log, Dialback & SMS Permissions Row
-        binding.rowTelephonyPermissions.setOnClickListener {
+        binding.tabAccount.rowTelephonyPermissions.setOnClickListener {
             provideHapticFeedback()
             requestTelephonyAndClusterPermissions()
         }
@@ -2809,7 +2472,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupThemeSelector() {
-        binding.btnModeDark.setOnClickListener {
+        binding.tabAccount.btnModeDark.setOnClickListener {
             provideHapticFeedback()
             if (!appSettings.isDarkMode) {
                 appSettings.isDarkMode = true
@@ -2820,7 +2483,7 @@ class MainActivity : AppCompatActivity() {
                 showFeedback("Dark mode active")
             }
         }
-        binding.btnModeLight.setOnClickListener {
+        binding.tabAccount.btnModeLight.setOnClickListener {
             provideHapticFeedback()
             if (appSettings.isDarkMode) {
                 appSettings.isDarkMode = false
@@ -2832,59 +2495,59 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.cardThemeWineRed.setOnClickListener {
+        binding.tabAccount.cardThemeWineRed.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_WINE_RED)
             showFeedback("Wine Red theme active")
         }
-        binding.cardThemeAmoled.setOnClickListener {
+        binding.tabAccount.cardThemeAmoled.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_AMOLED)
             showFeedback(if (appSettings.isDarkMode) "AMOLED Pure Black active" else "Pearl Minimal active")
         }
-        binding.cardThemeStealth.setOnClickListener {
+        binding.tabAccount.cardThemeStealth.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_STEALTH)
             showFeedback("Stealth Mono theme active")
         }
-        binding.cardThemeAmber.setOnClickListener {
+        binding.tabAccount.cardThemeAmber.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_AMBER)
             showFeedback("Neon Amber theme active")
         }
-        binding.cardThemeMint.setOnClickListener {
+        binding.tabAccount.cardThemeMint.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_MINT)
             showFeedback("Hyper Mint theme active")
         }
-        binding.cardThemeBlue.setOnClickListener {
+        binding.tabAccount.cardThemeBlue.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_BLUE)
             showFeedback("Liquid Blue theme active")
         }
-        binding.cardThemeCustom.setOnClickListener {
+        binding.tabAccount.cardThemeCustom.setOnClickListener {
             provideHapticFeedback()
             applyTheme(AppSettings.THEME_CUSTOM)
             showFeedback("Custom RGB theme active")
         }
 
         // Initialize SeekBars and Custom RGB values
-        binding.seekRed.progress = appSettings.customAccentRed
-        binding.seekGreen.progress = appSettings.customAccentGreen
-        binding.seekBlue.progress = appSettings.customAccentBlue
-        binding.tvRedValue.text = appSettings.customAccentRed.toString()
-        binding.tvGreenValue.text = appSettings.customAccentGreen.toString()
-        binding.tvBlueValue.text = appSettings.customAccentBlue.toString()
+        binding.tabAccount.seekRed.progress = appSettings.customAccentRed
+        binding.tabAccount.seekGreen.progress = appSettings.customAccentGreen
+        binding.tabAccount.seekBlue.progress = appSettings.customAccentBlue
+        binding.tabAccount.tvRedValue.text = appSettings.customAccentRed.toString()
+        binding.tabAccount.tvGreenValue.text = appSettings.customAccentGreen.toString()
+        binding.tabAccount.tvBlueValue.text = appSettings.customAccentBlue.toString()
         val initialHex = String.format(Locale.US, "#%02X%02X%02X", appSettings.customAccentRed, appSettings.customAccentGreen, appSettings.customAccentBlue)
         isUpdatingHexText = true
         try {
-            binding.etCustomHex.setText(initialHex)
+            binding.tabAccount.etCustomHex.setText(initialHex)
         } finally {
             isUpdatingHexText = false
         }
         val initialCustomColor = appSettings.getCustomAccentColor()
-        binding.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(initialCustomColor)
-        binding.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(initialCustomColor)
+        binding.tabAccount.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(initialCustomColor)
+        binding.tabAccount.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(initialCustomColor)
 
         val commitCustomAccentTheme = { r: Int, g: Int, b: Int ->
             appSettings.setCustomAccentRgb(r, g, b)
@@ -2892,24 +2555,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         val onSeekChanged = { fromUser: Boolean, immediateApply: Boolean ->
-            val r = binding.seekRed.progress
-            val g = binding.seekGreen.progress
-            val b = binding.seekBlue.progress
-            binding.tvRedValue.text = r.toString()
-            binding.tvGreenValue.text = g.toString()
-            binding.tvBlueValue.text = b.toString()
+            val r = binding.tabAccount.seekRed.progress
+            val g = binding.tabAccount.seekGreen.progress
+            val b = binding.tabAccount.seekBlue.progress
+            binding.tabAccount.tvRedValue.text = r.toString()
+            binding.tabAccount.tvGreenValue.text = g.toString()
+            binding.tabAccount.tvBlueValue.text = b.toString()
             val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
-            if (!binding.etCustomHex.isFocused && binding.etCustomHex.text.toString() != hex) {
+            if (!binding.tabAccount.etCustomHex.isFocused && binding.tabAccount.etCustomHex.text.toString() != hex) {
                 isUpdatingHexText = true
                 try {
-                    binding.etCustomHex.setText(hex)
+                    binding.tabAccount.etCustomHex.setText(hex)
                 } finally {
                     isUpdatingHexText = false
                 }
             }
             val color = Color.rgb(r, g, b)
-            binding.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(color)
-            binding.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(color)
+            binding.tabAccount.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(color)
+            binding.tabAccount.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(color)
 
             if (fromUser || appSettings.appTheme == AppSettings.THEME_CUSTOM) {
                 pendingSeekThemeRunnable?.let { mainUiHandler.removeCallbacks(it) }
@@ -2919,7 +2582,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val runnable = Runnable {
                         pendingSeekThemeRunnable = null
-                        commitCustomAccentTheme(binding.seekRed.progress, binding.seekGreen.progress, binding.seekBlue.progress)
+                        commitCustomAccentTheme(binding.tabAccount.seekRed.progress, binding.tabAccount.seekGreen.progress, binding.tabAccount.seekBlue.progress)
                     }
                     pendingSeekThemeRunnable = runnable
                     mainUiHandler.postDelayed(runnable, 90L)
@@ -2940,20 +2603,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.seekRed.setOnSeekBarChangeListener(seekListener)
-        binding.seekGreen.setOnSeekBarChangeListener(seekListener)
-        binding.seekBlue.setOnSeekBarChangeListener(seekListener)
+        binding.tabAccount.seekRed.setOnSeekBarChangeListener(seekListener)
+        binding.tabAccount.seekGreen.setOnSeekBarChangeListener(seekListener)
+        binding.tabAccount.seekBlue.setOnSeekBarChangeListener(seekListener)
 
         // Palette presets
         val setPreset = { r: Int, g: Int, b: Int, name: String ->
             provideHapticFeedback()
-            binding.seekRed.progress = r
-            binding.seekGreen.progress = g
-            binding.seekBlue.progress = b
+            binding.tabAccount.seekRed.progress = r
+            binding.tabAccount.seekGreen.progress = g
+            binding.tabAccount.seekBlue.progress = b
             val hex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
             isUpdatingHexText = true
             try {
-                binding.etCustomHex.setText(hex)
+                binding.tabAccount.etCustomHex.setText(hex)
             } finally {
                 isUpdatingHexText = false
             }
@@ -2961,15 +2624,15 @@ class MainActivity : AppCompatActivity() {
             showFeedback("$name applied")
         }
 
-        binding.chipPresetPurple.setOnClickListener { setPreset(130, 143, 255, "Linear Purple") }
-        binding.chipPresetStrava.setOnClickListener { setPreset(252, 76, 2, "Strava Orange") }
-        binding.chipPresetCyan.setOnClickListener { setPreset(6, 182, 212, "Cyber Cyan") }
-        binding.chipPresetPink.setOnClickListener { setPreset(236, 72, 153, "Neon Pink") }
-        binding.chipPresetLime.setOnClickListener { setPreset(132, 204, 22, "Kawasaki Lime") }
+        binding.tabAccount.chipPresetPurple.setOnClickListener { setPreset(130, 143, 255, "Linear Purple") }
+        binding.tabAccount.chipPresetStrava.setOnClickListener { setPreset(252, 76, 2, "Strava Orange") }
+        binding.tabAccount.chipPresetCyan.setOnClickListener { setPreset(6, 182, 212, "Cyber Cyan") }
+        binding.tabAccount.chipPresetPink.setOnClickListener { setPreset(236, 72, 153, "Neon Pink") }
+        binding.tabAccount.chipPresetLime.setOnClickListener { setPreset(132, 204, 22, "Kawasaki Lime") }
 
         // Manual Hex Input Handling
         val parseAndApplyHex = { showFeedbackMessage: Boolean ->
-            val raw = binding.etCustomHex.text.toString().trim()
+            val raw = binding.tabAccount.etCustomHex.text.toString().trim()
             var clean = raw.removePrefix("#").trim()
             if (clean.length == 3) {
                 clean = "${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}"
@@ -2980,24 +2643,24 @@ class MainActivity : AppCompatActivity() {
                     val r = Color.red(color)
                     val g = Color.green(color)
                     val b = Color.blue(color)
-                    binding.seekRed.progress = r
-                    binding.seekGreen.progress = g
-                    binding.seekBlue.progress = b
-                    binding.tvRedValue.text = r.toString()
-                    binding.tvGreenValue.text = g.toString()
-                    binding.tvBlueValue.text = b.toString()
+                    binding.tabAccount.seekRed.progress = r
+                    binding.tabAccount.seekGreen.progress = g
+                    binding.tabAccount.seekBlue.progress = b
+                    binding.tabAccount.tvRedValue.text = r.toString()
+                    binding.tabAccount.tvGreenValue.text = g.toString()
+                    binding.tabAccount.tvBlueValue.text = b.toString()
                     val canonicalHex = String.format(Locale.US, "#%02X%02X%02X", r, g, b)
-                    if (binding.etCustomHex.text.toString() != canonicalHex) {
+                    if (binding.tabAccount.etCustomHex.text.toString() != canonicalHex) {
                         isUpdatingHexText = true
                         try {
-                            binding.etCustomHex.setText(canonicalHex)
-                            binding.etCustomHex.setSelection(canonicalHex.length)
+                            binding.tabAccount.etCustomHex.setText(canonicalHex)
+                            binding.tabAccount.etCustomHex.setSelection(canonicalHex.length)
                         } finally {
                             isUpdatingHexText = false
                         }
                     }
-                    binding.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(color)
-                    binding.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(color)
+                    binding.tabAccount.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(color)
+                    binding.tabAccount.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(color)
 
                     pendingSeekThemeRunnable?.let { mainUiHandler.removeCallbacks(it) }
                     pendingSeekThemeRunnable = null
@@ -3018,12 +2681,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.etCustomHex.addTextChangedListener(object : android.text.TextWatcher {
+        binding.tabAccount.etCustomHex.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 if (isUpdatingHexText) return
-                if (binding.etCustomHex.isFocused) {
+                if (binding.tabAccount.etCustomHex.isFocused) {
                     val str = s?.toString()?.trim() ?: ""
                     val clean = str.removePrefix("#").trim()
                     if (clean.length == 6) {
@@ -3033,7 +2696,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        binding.etCustomHex.setOnEditorActionListener { v, _, _ ->
+        binding.tabAccount.etCustomHex.setOnEditorActionListener { v, _, _ ->
             provideHapticFeedback()
             val ok = parseAndApplyHex(true)
             if (ok) {
@@ -3044,13 +2707,13 @@ class MainActivity : AppCompatActivity() {
             ok
         }
 
-        binding.btnApplyHex.setOnClickListener {
+        binding.tabAccount.btnApplyHex.setOnClickListener {
             provideHapticFeedback()
             val ok = parseAndApplyHex(true)
             if (ok) {
                 val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-                imm?.hideSoftInputFromWindow(binding.etCustomHex.windowToken, 0)
-                binding.etCustomHex.clearFocus()
+                imm?.hideSoftInputFromWindow(binding.tabAccount.etCustomHex.windowToken, 0)
+                binding.tabAccount.etCustomHex.clearFocus()
             }
         }
     }
@@ -3060,7 +2723,6 @@ class MainActivity : AppCompatActivity() {
         currentTheme = theme
         appSettings.appTheme = themeKey
 
-        // 1. System Navigation & Status Bars (Edge-to-Edge transparent bars + light/dark icon appearance)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = theme.isLight
             isAppearanceLightNavigationBars = theme.isLight
@@ -3071,469 +2733,33 @@ class MainActivity : AppCompatActivity() {
             window.navigationBarColor = Color.TRANSPARENT
         }
 
-        // 2. Root Canvases, ScrollViews & Dividers
-        binding.rootLayout.setBackgroundColor(theme.backgroundColor)
-        binding.layoutTopBar.setBackgroundColor(theme.surfaceColor)
-        binding.layoutContentFrame.setBackgroundColor(theme.backgroundColor)
-        binding.scrollCockpit.setBackgroundColor(theme.backgroundColor)
-        binding.scrollFuel.setBackgroundColor(theme.backgroundColor)
-        binding.scrollSupport.setBackgroundColor(theme.backgroundColor)
-        binding.scrollSettings.setBackgroundColor(theme.backgroundColor)
-        binding.viewTopDivider.setBackgroundColor(theme.cardBorderColor)
-        binding.tvTopBarTitle.setTextColor(theme.textPrimaryColor)
-
-        // Appearance Mode Buttons
-        if (theme.isLight) {
-            binding.btnModeLight.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-            binding.btnModeLight.strokeColor = ColorStateList.valueOf(theme.accentColor)
-            binding.btnModeLight.setTextColor(theme.accentColor)
-            binding.btnModeLight.strokeWidth = dpToPx(2)
-
-            binding.btnModeDark.backgroundTintList = ColorStateList.valueOf(theme.cardColor)
-            binding.btnModeDark.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
-            binding.btnModeDark.setTextColor(theme.textSecondaryColor)
-            binding.btnModeDark.strokeWidth = dpToPx(1)
-        } else {
-            binding.btnModeDark.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-            binding.btnModeDark.strokeColor = ColorStateList.valueOf(theme.accentColor)
-            binding.btnModeDark.setTextColor(theme.accentColor)
-            binding.btnModeDark.strokeWidth = dpToPx(2)
-
-            binding.btnModeLight.backgroundTintList = ColorStateList.valueOf(theme.cardColor)
-            binding.btnModeLight.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
-            binding.btnModeLight.setTextColor(theme.textSecondaryColor)
-            binding.btnModeLight.strokeWidth = dpToPx(1)
-        }
-
-        // Themed Icons across all Tabs
-        val allThemedIcons = listOf(
-            binding.ivIconHome,
-            binding.ivIconWork,
-            binding.ivFuelHeaderIcon,
-            binding.ivRsaIcon,
-            binding.ivManualIcon,
-            binding.ivIssuesIcon,
-            binding.ivProfileAvatar,
-            binding.ivMyBikeIcon,
-            binding.ivGloveboxIcon,
-            binding.ivVaultQrIcon,
-            binding.ivVaultBackupIcon,
-            binding.ivNavAppPrefIcon,
-            binding.ivInterceptorIcon,
-            binding.ivBatteryOptIcon,
-            binding.ivSmsRejectIcon,
-            binding.ivTelephonyPermsIcon
-        )
-        for (icon in allThemedIcons) {
-            icon.imageTintList = ColorStateList.valueOf(theme.accentColor)
-        }
-
-        // 3. Content Cards across all Tabs
-        val contentCards = listOf(
-            binding.cardHeroRange,
-            binding.cardConnection,
-            binding.cardTftWifiMirror,
-            binding.cardEmergencyHome,
-            binding.cardQuickHome,
-            binding.cardQuickWork,
-            binding.cardNearbyPumps,
-            binding.cardAddFuel,
-            binding.cardFuelBreakdown,
-            binding.cardFuelLog,
-            binding.cardServiceHistory,
-            binding.cardChainLube,
-            binding.cardService,
-            binding.cardSupportOptions,
-            binding.cardBikeIssues,
-            binding.cardProfile,
-            binding.cardMyBike,
-            binding.cardOwnership,
-            binding.cardDataVault,
-            binding.cardNavPreference,
-            binding.cardHudMirror,
-            binding.cardCallerId,
-            binding.labsTftDebug.cardTftScreenDebugger,
-            binding.labsTftDebug.cardDebugLogConsole,
-            binding.cardToggles,
-            binding.cardQuickDestinations,
-            binding.cardAboutLegal,
-            binding.cardCustomRgb
-        )
-        for (card in contentCards) {
-            card.setCardBackgroundColor(theme.cardColor)
-            card.strokeColor = theme.cardBorderColor
-        }
-
-        // 4. Theme Selection Cards
-        val themeCards = listOf(
-            binding.cardThemeWineRed to (themeKey == AppSettings.THEME_WINE_RED),
-            binding.cardThemeAmoled to (themeKey == AppSettings.THEME_AMOLED),
-            binding.cardThemeStealth to (themeKey == AppSettings.THEME_STEALTH),
-            binding.cardThemeAmber to (themeKey == AppSettings.THEME_AMBER),
-            binding.cardThemeMint to (themeKey == AppSettings.THEME_MINT),
-            binding.cardThemeBlue to (themeKey == AppSettings.THEME_BLUE),
-            binding.cardThemeCustom to (themeKey == AppSettings.THEME_CUSTOM)
-        )
-        for ((card, isSelected) in themeCards) {
-            card.setCardBackgroundColor(theme.cardColor)
-            card.strokeColor = if (isSelected) theme.accentColor else theme.cardBorderColor
-            card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
-        }
-        binding.tvThemeAmoledTitle.text = if (theme.isLight) "Pearl Minimal" else "AMOLED Black"
-        binding.viewThemeAmoledDot.backgroundTintList = null
-        binding.viewThemeAmoledDot.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(if (theme.isLight) Color.parseColor("#E2E8F0") else Color.parseColor("#000000"))
-            setStroke(
-                dpToPx(2),
-                if (theme.isLight) Color.parseColor("#94A3B8") else Color.parseColor("#52525B")
-            )
-        }
-
-        // Custom RGB Swatches & Highlight
-        val customColor = appSettings.getCustomAccentColor()
-        binding.viewCustomThemeDot.backgroundTintList = ColorStateList.valueOf(customColor)
-        binding.viewRgbLivePreview.backgroundTintList = ColorStateList.valueOf(customColor)
-        binding.etCustomHex.background = createThemedInputDrawable()
-        binding.etCustomHex.setTextColor(theme.textPrimaryColor)
-        binding.etCustomHex.setHintTextColor(theme.textTertiaryColor)
-        if (!binding.etCustomHex.isFocused) {
-            val hex = String.format(Locale.US, "#%02X%02X%02X", appSettings.customAccentRed, appSettings.customAccentGreen, appSettings.customAccentBlue)
-            if (binding.etCustomHex.text.toString() != hex) {
+        CockpitThemeApplier.apply(
+            context = this,
+            binding = binding,
+            theme = theme,
+            themeKey = themeKey,
+            appSettings = appSettings,
+            isBleConnected = bleManager.connectionState.value is BleConnectionState.Connected,
+            setCustomHexSafely = { hex ->
                 isUpdatingHexText = true
                 try {
-                    binding.etCustomHex.setText(hex)
+                    binding.tabAccount.etCustomHex.setText(hex)
                 } finally {
                     isUpdatingHexText = false
                 }
-            }
-        }
-        binding.btnApplyHex.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.btnApplyHex.setTextColor(theme.onPrimaryColor)
-
-        if (themeKey == AppSettings.THEME_CUSTOM) {
-            binding.cardCustomRgb.strokeColor = theme.accentColor
-            binding.cardCustomRgb.strokeWidth = dpToPx(2)
-        } else {
-            binding.cardCustomRgb.strokeColor = theme.cardBorderColor
-            binding.cardCustomRgb.strokeWidth = dpToPx(1)
-        }
-
-        // Quick Palette Chips in Custom Theme Card (adaptive for dark & light modes)
-        if (theme.isLight) {
-            binding.chipPresetPurple.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EEF2FF"))
-            binding.chipPresetPurple.setTextColor(Color.parseColor("#4F46E5"))
-
-            binding.chipPresetStrava.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFF7ED"))
-            binding.chipPresetStrava.setTextColor(Color.parseColor("#EA580C"))
-
-            binding.chipPresetCyan.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#ECFEFF"))
-            binding.chipPresetCyan.setTextColor(Color.parseColor("#0891B2"))
-
-            binding.chipPresetPink.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FDF2F8"))
-            binding.chipPresetPink.setTextColor(Color.parseColor("#DB2777"))
-
-            binding.chipPresetLime.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F7FEE7"))
-            binding.chipPresetLime.setTextColor(Color.parseColor("#4D7C0F"))
-        } else {
-            binding.chipPresetPurple.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#242138"))
-            binding.chipPresetPurple.setTextColor(Color.parseColor("#828FFF"))
-
-            binding.chipPresetStrava.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#331A12"))
-            binding.chipPresetStrava.setTextColor(Color.parseColor("#FC4C02"))
-
-            binding.chipPresetCyan.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#122A36"))
-            binding.chipPresetCyan.setTextColor(Color.parseColor("#06B6D4"))
-
-            binding.chipPresetPink.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#361525"))
-            binding.chipPresetPink.setTextColor(Color.parseColor("#EC4899"))
-
-            binding.chipPresetLime.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#243312"))
-            binding.chipPresetLime.setTextColor(Color.parseColor("#84CC16"))
-        }
-
-        // 5. Cockpit Elements
-        binding.btnTopSos.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnTopSos.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnTopSos.setTextColor(theme.accentColor)
-
-        binding.tvProjectedRange.setTextColor(theme.accentColor)
-        binding.tvDteSubtext.setTextColor(theme.accentColor)
-        binding.btnRecalibrateCluster.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnRecalibrateCluster.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnRecalibrateCluster.setTextColor(theme.accentColor)
-        binding.progressFuelLevel.setIndicatorColor(theme.primaryColor)
-        binding.progressFuelLevel.trackColor = theme.cardBorderColor
-
-        binding.tvQuickHomeTitle.setTextColor(theme.accentColor)
-        binding.tvQuickWorkTitle.setTextColor(theme.accentColor)
-        binding.cardQuickHome.strokeColor = theme.borderColor
-        binding.cardQuickWork.strokeColor = theme.borderColor
-
-        val searchBg = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(14).toFloat()
-            setColor(if (theme.isLight) Color.parseColor("#FFFFFF") else Color.parseColor("#222128"))
-            setStroke(dpToPx(1), theme.cardBorderColor)
-        }
-        binding.layoutSearchBar.background = searchBg
-        binding.tvConnectionStatus.setTextColor(theme.textPrimaryColor)
-        binding.tvSubStatus.setTextColor(theme.textSecondaryColor)
-
-        binding.layoutManeuverIcon.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvManeuverIcon.setTextColor(theme.accentColor)
-        binding.tvDistance.setTextColor(theme.accentColor)
-        binding.tvMapsTbtFixLink.setTextColor(theme.accentColor)
-        binding.tvEtaBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvEtaBadge.setTextColor(theme.accentColor)
-
-        // Active TFT Live Navigation Dashboard Card
-        binding.cardActiveTftNavigation.setCardBackgroundColor(theme.cardColor)
-        binding.cardActiveTftNavigation.strokeColor = theme.primaryColor
-        binding.tvActiveNavNextTurn.setTextColor(theme.textPrimaryColor)
-        binding.tvActiveNavTripSummary.setTextColor(theme.textSecondaryColor)
-        binding.tvActiveNavStatusBadge.setTextColor(theme.accentColor)
-        binding.tvActiveNavStatusBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnActiveNavReroute.setTextColor(theme.textSecondaryColor)
-        binding.btnActiveNavStop.setTextColor(theme.primaryColor)
-
-        // Emergency Assistance Card
-        binding.tvEmergencyBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvEmergencyBadge.setTextColor(theme.accentColor)
-        binding.btnEmergencyHospitals.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnEmergencyAmbulance.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnEmergencyAmbulance.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnEmergencyAmbulance.setTextColor(theme.accentColor)
-        binding.tvBloodGroupBadge.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvBloodGroupBadge.setTextColor(theme.accentColor)
-        binding.tvEditMedicalLink.setTextColor(theme.accentColor)
-
-        binding.btnEnableNotificationAccess.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.btnEnableNotificationAccess.setTextColor(theme.onPrimaryColor)
-        binding.cardNotificationPermissionBanner.strokeColor = theme.cardBorderColor
-
-        binding.btnFindPumps.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.btnFindPumps.setTextColor(theme.onPrimaryColor)
-        binding.tvNearbyPumpsSubtext.setTextColor(theme.accentColor)
-        binding.tvTankSpecs.setTextColor(theme.textPrimaryColor)
-
-        if (bleManager.connectionState.value !is BleConnectionState.Connected) {
-            binding.btnScan.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-            binding.btnScan.setTextColor(theme.onPrimaryColor)
-        } else {
-            binding.btnScan.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-            binding.btnScan.setTextColor(theme.accentColor)
-        }
-
-        binding.btnConfigureTftWifi.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnConfigureTftWifi.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnConfigureTftWifi.setTextColor(theme.accentColor)
-        binding.btnToggleTftHudMirror.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.btnToggleTftHudMirror.setTextColor(theme.onPrimaryColor)
-        binding.btnCastLiveScreen.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnCastLiveScreen.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnCastLiveScreen.setTextColor(theme.accentColor)
-
-        // Status Banners
-        binding.tvMediaBanner.setTextColor(theme.accentColor)
-        binding.tvCallerStatus.setTextColor(theme.accentColor)
-        binding.tvWhatsAppAlertBanner.setTextColor(theme.accentColor)
-        binding.tvClusterActionStatus.setTextColor(theme.accentColor)
-
-        // Streamlined Metrics
-        binding.tvHomeOdometer.setTextColor(theme.accentColor)
-        binding.tvHomeMileage.setTextColor(theme.accentColor)
-        binding.tvAccountOdometer.setTextColor(theme.accentColor)
-        binding.btnEditOdo.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnEditOdo.setTextColor(theme.accentColor)
-        binding.btnEditOdo.strokeColor = ColorStateList.valueOf(theme.borderColor)
-
-        // Support Tab
-        binding.tvServiceHistoryAction.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.tvServiceHistoryAction.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.tvServiceHistoryAction.setTextColor(theme.accentColor)
-        binding.tvSupportTotalInvested.setTextColor(theme.accentColor)
-        binding.tvSupportServiceRemaining.setTextColor(theme.accentColor)
-        binding.progressSupportService.setIndicatorColor(theme.primaryColor)
-        binding.progressSupportService.trackColor = theme.cardBorderColor
-        binding.tvIssuesAction.setTextColor(theme.accentColor)
-        binding.tvServiceRemaining.setTextColor(theme.accentColor)
-        binding.progressService.setIndicatorColor(theme.primaryColor)
-        binding.progressService.trackColor = theme.cardBorderColor
-        binding.btnMarkServiced.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnMarkServiced.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnMarkServiced.setTextColor(theme.accentColor)
-
-        binding.btnSetServiceTarget.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnSetServiceTarget.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnSetServiceTarget.setTextColor(theme.accentColor)
-
-        binding.tvChainRemaining.setTextColor(theme.accentColor)
-        binding.progressChain.setIndicatorColor(theme.primaryColor)
-        binding.progressChain.trackColor = theme.cardBorderColor
-
-        binding.btnMarkChainLubed.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnMarkChainLubed.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnMarkChainLubed.setTextColor(theme.accentColor)
-
-        // Fuel Tab
-        binding.btnFuelAction.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnFuelAction.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnFuelAction.setTextColor(theme.accentColor)
-        binding.btnAddFuel.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnAddFuel.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnAddFuel.setTextColor(theme.accentColor)
-        binding.tvTotalInvestment.setTextColor(theme.accentColor)
-        binding.progressFuelInvestment.setIndicatorColor(theme.primaryColor)
-        binding.progressFuelInvestment.trackColor = theme.cardBorderColor
-
-        val fuelPriceBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(12).toFloat()
-            setColor(if (theme.isLight) Color.parseColor("#F1F3F7") else Color.parseColor("#1C1B20"))
-            setStroke(dpToPx(1), theme.cardBorderColor)
-        }
-        binding.rowFuelPriceSetting.background = fuelPriceBg
-        binding.tvFuelPriceTitle.setTextColor(theme.textPrimaryColor)
-        binding.tvFuelPriceCountrySubtitle.setTextColor(theme.textSecondaryColor)
-        binding.tvEditFuelPriceAction.setTextColor(theme.accentColor)
-
-        // Account Tab
-        binding.ivProfileAvatar.imageTintList = ColorStateList.valueOf(theme.accentColor)
-        binding.btnEditBikeInfo.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnEditBikeInfo.setTextColor(theme.accentColor)
-        binding.btnSetupBikeModel.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnSetupBikeModel.setTextColor(theme.accentColor)
-        binding.tvDocumentsBadge.setTextColor(theme.accentColor)
-        binding.tvVaultQrAction.setTextColor(theme.accentColor)
-        binding.tvVaultBackupAction.setTextColor(theme.accentColor)
-        val compactOutlinedBtns = listOf(
-            binding.btnConfigHome,
-            binding.btnConfigWork,
-            binding.btnConfigFavPlace,
-            binding.btnEditSmsRejectMsg
+            },
+            onUpdateDebugFilterChips = { tftLabsController.updateDebugFilterChipsUi() }
         )
-        for (btn in compactOutlinedBtns) {
-            btn.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-            btn.strokeColor = ColorStateList.valueOf(theme.borderColor)
-            btn.strokeWidth = dpToPx(1)
-            btn.setTextColor(theme.accentColor)
-        }
-
-        fun applyRoundedSurfaceBox(view: View, fillColor: Int, strokeColor: Int, radiusDp: Float = 10f) {
-            val pl = view.paddingLeft
-            val pt = view.paddingTop
-            val pr = view.paddingRight
-            val pb = view.paddingBottom
-            view.backgroundTintList = null
-            view.background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(radiusDp.toInt()).toFloat()
-                setColor(fillColor)
-                setStroke(dpToPx(1), strokeColor)
-            }
-            view.setPadding(pl, pt, pr, pb)
-        }
-
-        val innerBoxFill = theme.surfaceColor
-        val innerBoxStroke = theme.cardBorderColor
-        listOf(
-            binding.tvPacketHex,
-            binding.tvPacketDecoded,
-            binding.tvWhatsAppAlertBanner,
-            binding.tvClusterActionStatus,
-            binding.labsTftDebug.tvBleDiagBanner,
-            binding.labsTftDebug.tvTftDbgTouchInfo,
-            binding.labsTftDebug.scrollDebugLogs
-        ).forEach { applyRoundedSurfaceBox(it, innerBoxFill, innerBoxStroke, 10f) }
-
-        binding.tvPacketHex.setTextColor(theme.textSecondaryColor)
-        binding.tvPacketDecoded.setTextColor(theme.textSecondaryColor)
-        binding.labsTftDebug.tvBleDiagBanner.setTextColor(theme.textPrimaryColor)
-        binding.labsTftDebug.tvTftDbgTouchInfo.setTextColor(theme.textSecondaryColor)
-        binding.labsTftDebug.tvTftDbgMetrics.setTextColor(theme.textSecondaryColor)
-        binding.labsTftDebug.tvDebugLogStats.setTextColor(theme.textSecondaryColor)
-        binding.labsTftDebug.tvDebugLogOutput.setTextColor(theme.textSecondaryColor)
-        applyRoundedSurfaceBox(binding.tvMissedCallBadge, theme.subtleColor, theme.borderColor, 16f)
-        binding.tvMissedCallBadge.setTextColor(theme.accentColor)
-        applyRoundedSurfaceBox(binding.labsTftDebug.tvTftDbgStatus, theme.subtleColor, theme.borderColor, 16f)
-        if (binding.labsTftDebug.tvTftDbgStatus.text == "IDLE") {
-            binding.labsTftDebug.tvTftDbgStatus.setTextColor(theme.textSecondaryColor)
-        }
-
-        val testButtons = listOf(
-            binding.btnTestLeft, binding.btnTestStraight, binding.btnTestRight, binding.btnTestRoundabout,
-            binding.btnSimulateCall, binding.btnSimulateWhatsApp, binding.btnSimulateSms, binding.btnSimulateMissedCall,
-            binding.btnSyncPhonebookCalls, binding.btnGrantTelephonyPerms,
-            binding.labsTftDebug.btnTftDbgFullscreen, binding.labsTftDebug.btnTftDbgNavV2Test,
-            binding.labsTftDebug.btnTftDbgRecenter, binding.labsTftDebug.btnTftDbgDaylight,
-            binding.labsTftDebug.btnTftDbgMotion, binding.labsTftDebug.btnTftDbgHitboxes,
-            binding.labsTftDebug.btnLogPauseResume, binding.labsTftDebug.btnLogCopy,
-            binding.labsTftDebug.btnLogShare, binding.labsTftDebug.btnLogClear
-        )
-        for (btn in testButtons) {
-            btn.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-            btn.strokeColor = ColorStateList.valueOf(theme.borderColor)
-            btn.setTextColor(theme.accentColor)
-        }
-        binding.labsTftDebug.pbTftJpegBudget.progressTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.labsTftDebug.btnTftDbgTogglePreview.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-        binding.labsTftDebug.btnTftDbgTogglePreview.setTextColor(theme.onPrimaryColor)
-        updateDebugFilterChipsUi()
-        binding.btnStopSimulation.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-        binding.btnStopSimulation.strokeColor = ColorStateList.valueOf(theme.borderColor)
-        binding.btnStopSimulation.setTextColor(theme.textSecondaryColor)
+        tftLabsController.updateDebugFilterChipsUi()
         updateSimulationUiState(bleManager.isSimulationRunning.value, bleManager.currentActiveManeuver.value)
 
-        // Switches
-        val switches = listOf(
-            binding.switchAutoConnect,
-            binding.switchTwoWheeler,
-            binding.switchAutoPark,
-            binding.switchRideTracking,
-            binding.switchMediaControl,
-            binding.switchWhatsAppAlerts,
-            binding.switchTelemetry,
-            binding.switchSkipHeadunitNav,
-            binding.switchSmsReject
-        )
-        val switchStates = arrayOf(
-            intArrayOf(android.R.attr.state_checked),
-            intArrayOf(-android.R.attr.state_checked)
-        )
-        val trackColors = intArrayOf(
-            theme.primaryColor,
-            theme.cardBorderColor
-        )
-        val thumbColors = intArrayOf(
-            theme.onPrimaryColor,
-            theme.textTertiaryColor
-        )
-        val trackTintList = ColorStateList(switchStates, trackColors)
-        val thumbTintList = ColorStateList(switchStates, thumbColors)
-
-        for (sw in switches) {
-            sw.trackTintList = trackTintList
-            sw.thumbTintList = thumbTintList
+        if (::discoveredBikeAdapter.isInitialized) {
+            discoveredBikeAdapter.updateTheme(theme)
         }
-
-        // Bottom Navigation Bar
-        binding.bottomNav.setBackgroundColor(theme.surfaceColor)
-        binding.bottomNav.itemActiveIndicatorColor = ColorStateList.valueOf(theme.subtleColor)
-        val navStates = arrayOf(
-            intArrayOf(android.R.attr.state_checked),
-            intArrayOf(-android.R.attr.state_checked)
-        )
-        val navColors = intArrayOf(
-            theme.accentColor,
-            theme.textTertiaryColor
-        )
-        val navColorList = ColorStateList(navStates, navColors)
-        binding.bottomNav.itemIconTintList = navColorList
-        binding.bottomNav.itemTextColor = navColorList
-
-        // Dynamic Lists (defer off-screen Fuel list inflation until tab becomes visible)
-        if (binding.scrollFuel.visibility == View.VISIBLE) {
+        if (::fuelListAdapter.isInitialized) {
+            fuelListAdapter.updateStyle(theme, appSettings.currentCurrencySymbol)
+        }
+        if (binding.tabFuel.root.visibility == View.VISIBLE) {
             fuelListThemeDirty = false
             try {
                 updateFuelList(fuelLogManager.entries.value)
@@ -3547,39 +2773,8 @@ class MainActivity : AppCompatActivity() {
         updateBikeIssuesSummary()
     }
 
-    private fun createThemedInputDrawable(): Drawable {
-        val fillColor = if (currentTheme.isLight) Color.parseColor("#FFFFFF") else Color.parseColor("#1C1B20")
-        val normalBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(12).toFloat()
-            setColor(fillColor)
-            setStroke(dpToPx(1), currentTheme.cardBorderColor)
-        }
-        val focusedBg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(12).toFloat()
-            setColor(fillColor)
-            setStroke(dpToPx(2), currentTheme.accentColor)
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), focusedBg)
-            addState(intArrayOf(), normalBg)
-        }
-    }
-
-    private fun applyThemeToEditText(editText: EditText) {
-        editText.setTextColor(currentTheme.textPrimaryColor)
-        editText.setHintTextColor(currentTheme.textTertiaryColor)
-        editText.highlightColor = ColorUtils.setAlphaComponent(currentTheme.accentColor, 60)
-        editText.background = createThemedInputDrawable()
-        editText.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            editText.textCursorDrawable = null
-            editText.textSelectHandle?.setTint(currentTheme.accentColor)
-            editText.textSelectHandleLeft?.setTint(currentTheme.accentColor)
-            editText.textSelectHandleRight?.setTint(currentTheme.accentColor)
-        }
-    }
+    private fun applyThemeToEditText(editText: EditText) =
+        CockpitThemeApplier.applyThemeToEditText(this, editText, currentTheme)
 
     private fun createThemedEditText(
         hintText: String? = null,
@@ -3594,14 +2789,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun dpToPx(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
-    }
+    private fun dpToPx(dp: Int): Int = CockpitThemeApplier.dpToPx(this, dp)
+
 
     private fun setupQuickNav() {
         updateQuickNavButtons()
 
-        binding.cardQuickHome.setOnClickListener {
+        binding.tabCockpit.cardQuickHome.setOnClickListener {
             provideHapticFeedback()
             val isWaze = appSettings.preferredNavApp == AppSettings.NAV_APP_WAZE
             val addr = appSettings.homeAddress
@@ -3619,13 +2813,13 @@ class MainActivity : AppCompatActivity() {
                 launchNavigationTo(addr.ifBlank { "Home" })
             }
         }
-        binding.cardQuickHome.setOnLongClickListener {
+        binding.tabCockpit.cardQuickHome.setOnLongClickListener {
             provideHapticFeedback()
             showSetAddressDialog("Home", 0)
             true
         }
 
-        binding.cardQuickWork.setOnClickListener {
+        binding.tabCockpit.cardQuickWork.setOnClickListener {
             provideHapticFeedback()
             val isWaze = appSettings.preferredNavApp == AppSettings.NAV_APP_WAZE
             val addr = appSettings.workAddress
@@ -3643,23 +2837,23 @@ class MainActivity : AppCompatActivity() {
                 launchNavigationTo(addr.ifBlank { "Work" })
             }
         }
-        binding.cardQuickWork.setOnLongClickListener {
+        binding.tabCockpit.cardQuickWork.setOnLongClickListener {
             provideHapticFeedback()
             showSetAddressDialog("Work", 1)
             true
         }
 
-        binding.btnConfigHome.setOnClickListener {
+        binding.tabAccount.btnConfigHome.setOnClickListener {
             provideHapticFeedback()
             showSetAddressDialog("Home", 0)
         }
 
-        binding.btnConfigWork.setOnClickListener {
+        binding.tabAccount.btnConfigWork.setOnClickListener {
             provideHapticFeedback()
             showSetAddressDialog("Work", 1)
         }
 
-        binding.btnConfigFavPlace.setOnClickListener {
+        binding.tabAccount.btnConfigFavPlace.setOnClickListener {
             provideHapticFeedback()
             showSetAddressDialog("Favorite", 2)
         }
@@ -3668,23 +2862,23 @@ class MainActivity : AppCompatActivity() {
     private fun updateNavAppSelectionUi() {
         val isWaze = appSettings.preferredNavApp == AppSettings.NAV_APP_WAZE
         if (isWaze) {
-            binding.tvNavAppCurrentStatus.text = "Currently: Waze (Turn-by-turn routing active)"
-            binding.btnNavChooseWaze.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-            binding.btnNavChooseWaze.setTextColor(currentTheme.accentColor)
-            binding.btnNavChooseWaze.strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
+            binding.tabAccount.tvNavAppCurrentStatus.text = "Currently: Waze (Turn-by-turn routing active)"
+            binding.tabAccount.btnNavChooseWaze.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+            binding.tabAccount.btnNavChooseWaze.setTextColor(currentTheme.accentColor)
+            binding.tabAccount.btnNavChooseWaze.strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
 
-            binding.btnNavChooseGmaps.backgroundTintList = ColorStateList.valueOf(currentTheme.cardColor)
-            binding.btnNavChooseGmaps.setTextColor(currentTheme.textSecondaryColor)
-            binding.btnNavChooseGmaps.strokeColor = ColorStateList.valueOf(currentTheme.cardBorderColor)
+            binding.tabAccount.btnNavChooseGmaps.backgroundTintList = ColorStateList.valueOf(currentTheme.cardColor)
+            binding.tabAccount.btnNavChooseGmaps.setTextColor(currentTheme.textSecondaryColor)
+            binding.tabAccount.btnNavChooseGmaps.strokeColor = ColorStateList.valueOf(currentTheme.cardBorderColor)
         } else {
-            binding.tvNavAppCurrentStatus.text = "Currently: Google Maps (Two-Wheeler routing active)"
-            binding.btnNavChooseGmaps.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-            binding.btnNavChooseGmaps.setTextColor(currentTheme.accentColor)
-            binding.btnNavChooseGmaps.strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
+            binding.tabAccount.tvNavAppCurrentStatus.text = "Currently: Google Maps (Two-Wheeler routing active)"
+            binding.tabAccount.btnNavChooseGmaps.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+            binding.tabAccount.btnNavChooseGmaps.setTextColor(currentTheme.accentColor)
+            binding.tabAccount.btnNavChooseGmaps.strokeColor = ColorStateList.valueOf(currentTheme.borderColor)
 
-            binding.btnNavChooseWaze.backgroundTintList = ColorStateList.valueOf(currentTheme.cardColor)
-            binding.btnNavChooseWaze.setTextColor(currentTheme.textSecondaryColor)
-            binding.btnNavChooseWaze.strokeColor = ColorStateList.valueOf(currentTheme.cardBorderColor)
+            binding.tabAccount.btnNavChooseWaze.backgroundTintList = ColorStateList.valueOf(currentTheme.cardColor)
+            binding.tabAccount.btnNavChooseWaze.setTextColor(currentTheme.textSecondaryColor)
+            binding.tabAccount.btnNavChooseWaze.strokeColor = ColorStateList.valueOf(currentTheme.cardBorderColor)
         }
     }
 
@@ -3695,16 +2889,16 @@ class MainActivity : AppCompatActivity() {
         val defaultHomeLabel = if (isWaze) "Waze Saved Home" else "Google Maps Saved Home"
         val defaultWorkLabel = if (isWaze) "Waze Saved Work" else "Google Maps Saved Work"
 
-        binding.tvQuickHomeTitle.text = "Home"
-        binding.tvQuickWorkTitle.text = "Work"
+        binding.tabCockpit.tvQuickHomeTitle.text = "Home"
+        binding.tabCockpit.tvQuickWorkTitle.text = "Work"
 
         val displayHome = if (home.isNotBlank() && !home.equals("Home", ignoreCase = true)) home else defaultHomeLabel
         val displayWork = if (work.isNotBlank() && !work.equals("Work", ignoreCase = true)) work else defaultWorkLabel
         val fav = appSettings.favPlaceAddress.trim()
         val displayFav = fav.ifBlank { "Not configured (optional 3rd cluster favorite)" }
-        binding.tvSettingsHome.text = "Home: $displayHome"
-        binding.tvSettingsWork.text = "Work: $displayWork"
-        binding.tvSettingsFavPlace.text = "Favorite: $displayFav"
+        binding.tabAccount.tvSettingsHome.text = "Home: $displayHome"
+        binding.tabAccount.tvSettingsWork.text = "Work: $displayWork"
+        binding.tabAccount.tvSettingsFavPlace.text = "Favorite: $displayFav"
     }
 
     private fun provideHapticFeedback() {
@@ -3858,412 +3052,26 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showDataVaultBottomSheet(openQrDirectly: Boolean = false) {
-        val dialog = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
-        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_data_vault, null)
-        dialog.setContentView(sheetView)
+    private fun showDataVaultBottomSheet(openQrDirectly: Boolean = false) =
+        dataVaultController.show(openQrDirectly)
 
-        val layoutQr = sheetView.findViewById<LinearLayout>(R.id.layoutQrContainer)
-        val ivQr = sheetView.findViewById<ImageView>(R.id.ivVaultQrCode)
-        val btnShowQr = sheetView.findViewById<MaterialButton>(R.id.btnSheetShowQr)
-        val btnScanQr = sheetView.findViewById<MaterialButton>(R.id.btnSheetScanQr)
-        val btnExportVault = sheetView.findViewById<MaterialButton>(R.id.btnSheetExportVault)
-        val btnImportVault = sheetView.findViewById<MaterialButton>(R.id.btnSheetImportVault)
+    private fun showExternalVaultImportConfirmation(uri: Uri) =
+        dataVaultController.showExternalImportConfirmation(uri)
 
-        btnExportVault?.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
-        btnExportVault?.setTextColor(currentTheme.onPrimaryColor)
-        btnScanQr?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-        btnScanQr?.setTextColor(currentTheme.accentColor)
+    private fun importVaultFromUri(uri: Uri) =
+        dataVaultController.importFromUri(uri)
 
-        fun loadAndShowQr(includeSensitiveProfile: Boolean = false, passphrase: String? = null) {
-            lifecycleScope.launch {
-                try {
-                    val bitmap = withContext(Dispatchers.Default) {
-                        DataVaultManager.getInstance(this@MainActivity).generateSetupQrBitmap(
-                            width = 600,
-                            height = 600,
-                            includeSensitiveProfile = includeSensitiveProfile,
-                            passphrase = passphrase
-                        )
-                    }
-                    if (!dialog.isShowing) return@launch
-                    ivQr?.setImageBitmap(bitmap)
-                    layoutQr?.visibility = View.VISIBLE
-                } catch (e: Exception) {
-                    showFeedback("QR Generation failed: ${e.message}", isAlert = true)
-                }
-            }
-        }
-
-        if (openQrDirectly) {
-            layoutQr?.visibility = View.VISIBLE
-            dialog.setOnShowListener { loadAndShowQr(includeSensitiveProfile = false, passphrase = null) }
-        }
-
-        btnShowQr?.setOnClickListener {
-            provideHapticFeedback()
-            if (layoutQr?.visibility == View.VISIBLE) {
-                layoutQr.visibility = View.GONE
-            } else {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("Migration QR Privacy")
-                    .setMessage(
-                        "Choose whether to generate a safe Bike & Theme QR (no personal/medical details) " +
-                            "or an AES-256-GCM Encrypted Full Profile QR."
-                    )
-                    .setPositiveButton("Bike Settings Only") { _, _ ->
-                        loadAndShowQr(includeSensitiveProfile = false, passphrase = null)
-                    }
-                    .setNeutralButton("Full Encrypted QR") { _, _ ->
-                        val layout = LinearLayout(this).apply {
-                            orientation = LinearLayout.VERTICAL
-                            setPadding(48, 20, 48, 10)
-                        }
-                        val etPass = createThemedEditText(
-                            hintText = "QR Encryption Passphrase",
-                            inputTypeFlags = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                        )
-                        layout.addView(etPass)
-                        MaterialAlertDialogBuilder(this)
-                            .setTitle("Encrypt Migration QR")
-                            .setView(layout)
-                            .setPositiveButton("Generate Encrypted QR") { _, _ ->
-                                val pass = etPass.text.toString().trim()
-                                if (pass.isBlank()) {
-                                    showFeedback("Enter a passphrase to encrypt full profile QR.", isAlert = true)
-                                } else {
-                                    loadAndShowQr(includeSensitiveProfile = true, passphrase = pass)
-                                }
-                            }
-                            .setNegativeButton("Cancel", null)
-                            .show()
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
-        }
-
-        btnScanQr?.setOnClickListener {
-            provideHapticFeedback()
-            dialog.dismiss()
-            launchGoogleCodeScanner()
-        }
-
-        btnExportVault?.setOnClickListener {
-            provideHapticFeedback()
-            dialog.dismiss()
-            binding.rootLayout.postDelayed({
-                if (!isFinishing && !isDestroyed) {
-                    showExportVaultPassphraseDialog()
-                }
-            }, 250)
-        }
-
-        btnImportVault?.setOnClickListener {
-            provideHapticFeedback()
-            dialog.dismiss()
-            binding.rootLayout.postDelayed({
-                if (isFinishing || isDestroyed) return@postDelayed
-                try {
-                    vaultGetContentPicker.launch("*/*")
-                } catch (e: Exception) {
-                    try {
-                        vaultFilePicker.launch(arrayOf("*/*"))
-                    } catch (e2: Exception) {
-                        showFeedback("File picker unavailable: ${e2.message}", isAlert = true)
-                    }
-                }
-            }, 250)
-        }
-
-        dialog.show()
-    }
-
-    private fun showExportVaultPassphraseDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 10)
-        }
-        val tvDesc = TextView(this).apply {
-            text = "Recommended: enter a strong passphrase to encrypt your .pnav backup with AES-256-GCM before sharing."
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-            setPadding(0, 0, 0, 14)
-        }
-        val etPassphrase = createThemedEditText(
-            hintText = "Encryption passphrase",
-            inputTypeFlags = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        )
-        layout.addView(tvDesc)
-        layout.addView(etPassphrase)
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Export Data Vault")
-            .setView(layout)
-            .setPositiveButton("Export") { _, _ ->
-                val rawPass = etPassphrase.text.toString().trim()
-                if (rawPass.isNotEmpty()) {
-                    exportVaultFile(passphrase = rawPass, allowUnencrypted = false)
-                } else {
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("Export Unencrypted Backup?")
-                        .setMessage(
-                            "Without a passphrase, the exported .pnav.json file stores emergency contacts, medical notes, " +
-                                "home/work addresses, parked coordinates, and service history in plaintext."
-                        )
-                        .setPositiveButton("Encrypt Instead") { _, _ ->
-                            showExportVaultPassphraseDialog()
-                        }
-                        .setNeutralButton("Export Plaintext") { _, _ ->
-                            exportVaultFile(passphrase = null, allowUnencrypted = true)
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun exportVaultFile(passphrase: String? = null, allowUnencrypted: Boolean = false) {
-        lifecycleScope.launch {
-            try {
-                android.util.Log.i("PulsarNav", "Exporting vault file...")
-                val manager = DataVaultManager.getInstance(this@MainActivity)
-                val file = withContext(Dispatchers.IO) {
-                    manager.exportVaultToFile(passphrase, allowUnencrypted = allowUnencrypted)
-                }
-                android.util.Log.i("PulsarNav", "Vault file created: ${file.absolutePath}, size=${file.length()} bytes")
-                val chooser = manager.createVaultShareIntent(file)
-                startActivity(chooser)
-                showFeedback(if (passphrase != null) "Encrypted .pnav vault exported" else "Plaintext .pnav.json vault exported")
-            } catch (e: Throwable) {
-                android.util.Log.e("PulsarNav", "Export failed", e)
-                showFeedback("Export failed: ${e.message}", isAlert = true)
-            }
-        }
-    }
-
-    private fun readBoundedText(stream: java.io.InputStream): String {
-        val out = java.io.ByteArrayOutputStream()
-        val buf = ByteArray(8192)
-        var total = 0
-        while (true) {
-            val n = stream.read(buf)
-            if (n <= 0) break
-            total += n
-            if (total > MAX_VAULT_IMPORT_BYTES) {
-                throw IllegalArgumentException("Vault file exceeds ${MAX_VAULT_IMPORT_BYTES / (1024 * 1024)} MB limit")
-            }
-            out.write(buf, 0, n)
-        }
-        return out.toString(Charsets.UTF_8.name())
-    }
-
-    private suspend fun readTextFromUriSafe(uri: Uri): String? = withContext(Dispatchers.IO) {
-        android.util.Log.i("PulsarNav", "Reading vault text from URI: $uri, scheme: ${uri.scheme}")
-        try {
-            contentResolver.openInputStream(uri)?.use { stream ->
-                val content = readBoundedText(stream)
-                if (content.isNotBlank()) return@withContext content
-            }
-        } catch (e: IllegalArgumentException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.w("PulsarNav", "openInputStream failed for $uri: ${e.message}")
-        }
-
-        if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            val filePath = uri.path
-            if (!filePath.isNullOrBlank()) {
-                try {
-                    val file = File(filePath)
-                    if (file.exists() && file.canRead()) {
-                        file.inputStream().use { stream ->
-                            val content = readBoundedText(stream)
-                            if (content.isNotBlank()) return@withContext content
-                        }
-                    }
-                } catch (e: IllegalArgumentException) {
-                    throw e
-                } catch (e: Exception) {
-                    android.util.Log.w("PulsarNav", "Direct file read failed for $filePath: ${e.message}")
-                }
-            }
-        }
-
-        try {
-            contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                java.io.FileInputStream(pfd.fileDescriptor).use { stream ->
-                    val content = readBoundedText(stream)
-                    if (content.isNotBlank()) return@withContext content
-                }
-            }
-        } catch (e: IllegalArgumentException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.w("PulsarNav", "openFileDescriptor failed: ${e.message}")
-        }
-
-        null
-    }
-
-    private fun showExternalVaultImportConfirmation(uri: Uri) {
-        val fileName = try {
-            uri.lastPathSegment?.substringAfterLast('/') ?: "Data Vault Backup"
-        } catch (_: Exception) {
-            "Data Vault Backup"
-        }
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-            .setTitle("Restore Data Vault?")
-            .setMessage("Do you want to restore motorcycle settings, trips, and fuel logs from '$fileName' into PulsarNav?")
-            .setPositiveButton("Restore") { _, _ ->
-                importVaultFromUri(uri)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showDecryptVaultPassphraseDialog(rawContent: String) {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 10)
-        }
-        val tvDesc = TextView(this).apply {
-            text = "This .pnav backup is encrypted. Enter your passphrase to restore:"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-            setPadding(0, 0, 0, 14)
-        }
-        val etPassphrase = createThemedEditText(
-            hintText = "Passphrase",
-            inputTypeFlags = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        )
-        layout.addView(tvDesc)
-        layout.addView(etPassphrase)
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Unlock Encrypted Vault")
-            .setView(layout)
-            .setPositiveButton("Unlock & Restore") { _, _ ->
-                val pass = etPassphrase.text.toString().trim()
-                executeVaultImport(rawContent, pass)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun executeVaultImport(rawContent: String, passphrase: String?) {
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.Default) {
-                DataVaultManager.getInstance(this@MainActivity).importVaultFromInput(rawContent, passphrase)
-            }
-            result.onSuccess { summary ->
-                val name = summary.riderName.ifBlank { summary.bikeName.ifBlank { "Bike" } }
-                showFeedback("Vault Restored: ${summary.tripsImported} trips, ${summary.fuelEntriesImported} fuel logs for $name")
-                try {
-                    refreshAllUiAfterVaultImport()
-                } catch (e: Exception) {
-                    android.util.Log.e("PulsarNav", "Error refreshing UI after vault import", e)
-                }
-            }.onFailure { err ->
-                if (err is VaultPassphraseRequiredException) {
-                    showDecryptVaultPassphraseDialog(rawContent)
-                } else {
-                    android.util.Log.e("PulsarNav", "Vault import failed", err)
-                    showFeedback("Import failed: ${err.message ?: "Invalid vault file"}", isAlert = true)
-                }
-            }
-        }
-    }
-
-    private fun importVaultFromUri(uri: Uri) {
-        lifecycleScope.launch {
-            try {
-                android.util.Log.i("PulsarNav", "Importing vault from URI: $uri")
-                val rawContent = readTextFromUriSafe(uri)
-                if (!rawContent.isNullOrBlank()) {
-                    executeVaultImport(rawContent, passphrase = null)
-                } else {
-                    showFeedback("Could not read backup file. Please select the file using 'Import File'.", isAlert = true)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PulsarNav", "Error importing vault", e)
-                showFeedback("Import error: ${e.message}", isAlert = true)
-            }
-        }
-    }
-
-    private fun executeQrImport(rawValue: String, passphrase: String? = null) {
-        val result = DataVaultManager.getInstance(this).importFromQrPayload(rawValue, passphrase)
-        result.onSuccess { msg ->
-            showFeedback(msg)
-            refreshAllUiAfterVaultImport()
-        }.onFailure { err ->
-            if (err is VaultPassphraseRequiredException) {
-                showDecryptQrPassphraseDialog(rawValue)
-            } else {
-                showFeedback("QR Error: ${err.message}", isAlert = true)
-            }
-        }
-    }
-
-    private fun showDecryptQrPassphraseDialog(rawQrPayload: String) {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 20, 48, 10)
-        }
-        val tvDesc = TextView(this).apply {
-            text = "This migration QR is encrypted. Enter its passphrase to restore:"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-            setPadding(0, 0, 0, 14)
-        }
-        val etPass = createThemedEditText(
-            hintText = "QR Passphrase",
-            inputTypeFlags = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        )
-        layout.addView(tvDesc)
-        layout.addView(etPass)
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Unlock Migration QR")
-            .setView(layout)
-            .setPositiveButton("Unlock") { _, _ ->
-                executeQrImport(rawQrPayload, etPass.text.toString().trim())
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun launchGoogleCodeScanner() {
-        try {
-            val scanner = GmsBarcodeScanning.getClient(this)
-            scanner.startScan()
-                .addOnSuccessListener { barcode: Barcode ->
-                    val rawValue = barcode.rawValue
-                    if (!rawValue.isNullOrBlank()) {
-                        executeQrImport(rawValue)
-                    }
-                }
-                .addOnFailureListener { e: Exception ->
-                    showFeedback("Scan cancelled: ${e.message}", isAlert = true)
-                }
-        } catch (e: Exception) {
-            showFeedback("Google Code Scanner not available: ${e.message}", isAlert = true)
-        }
-    }
 
     private fun refreshAllUiAfterVaultImport() {
-        binding.switchAutoConnect.isChecked = appSettings.isAutoConnectEnabled
-        binding.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
-        binding.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
-        binding.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
-        binding.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
-        binding.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
-        binding.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
-        binding.switchSkipHeadunitNav.isChecked = appSettings.isSkipClusterNavWhenHeadunit
-        binding.switchSmsReject.isChecked = appSettings.isSmsRejectEnabled
+        binding.tabAccount.switchAutoConnect.isChecked = appSettings.isAutoConnectEnabled
+        binding.tabAccount.switchTwoWheeler.isChecked = appSettings.isTwoWheelerMode
+        binding.tabAccount.switchAutoPark.isChecked = appSettings.isAutoParkEnabled
+        binding.tabAccount.switchRideTracking.isChecked = appSettings.isRideTrackingEnabled
+        binding.tabAccount.switchMediaControl.isChecked = appSettings.isMediaControlEnabled
+        binding.tabAccount.switchWhatsAppAlerts.isChecked = appSettings.isWhatsAppAlertsEnabled
+        binding.tabAccount.switchTelemetry.isChecked = appSettings.isTelemetrySyncEnabled
+        binding.tabAccount.switchSkipHeadunitNav.isChecked = appSettings.isSkipClusterNavWhenHeadunit
+        binding.tabAccount.switchSmsReject.isChecked = appSettings.isSmsRejectEnabled
         updateFuelPriceUi()
         updateBikeInfoDisplay()
         updateDocumentsSummary()
@@ -4309,13 +3117,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateNotificationAccessUi() {
         val granted = isNotificationAccessGranted()
         val diag = GoogleMapsNotificationListener.diagnostics.value
-        binding.cardNotificationPermissionBanner.visibility = if (granted) View.GONE else View.VISIBLE
-        binding.tvNotificationAccessStatus.text = when {
+        binding.tabCockpit.cardNotificationPermissionBanner.visibility = if (granted) View.GONE else View.VISIBLE
+        binding.tabAccount.tvNotificationAccessStatus.text = when {
             !granted -> "Action Required (Tap to Enable)"
             diag.mapsActiveInShade -> "Active • Live Maps notification detected"
             else -> "Listener ON • Tap for Maps channel & TBT fix"
         }
-        binding.tvNotificationAccessStatus.setTextColor(
+        binding.tabAccount.tvNotificationAccessStatus.setTextColor(
             ContextCompat.getColor(this, if (granted) R.color.mint_accent else R.color.amber_accent)
         )
     }
@@ -4347,12 +3155,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBatteryOptimizationUi() {
         val isUnrestricted = isBatteryOptimizationIgnored()
-        binding.tvBatteryOptimizationStatus.text = if (isUnrestricted) {
+        binding.tabAccount.tvBatteryOptimizationStatus.text = if (isUnrestricted) {
             "Unrestricted (Protected in background)"
         } else {
             "Optimized (Tap to allow unrestricted background)"
         }
-        binding.tvBatteryOptimizationStatus.setTextColor(
+        binding.tabAccount.tvBatteryOptimizationStatus.setTextColor(
             ContextCompat.getColor(
                 this,
                 if (isUnrestricted) R.color.mint_accent else R.color.amber_accent
@@ -4380,6 +3188,8 @@ class MainActivity : AppCompatActivity() {
 
         val ivIcon = sheetView.findViewById<ImageView>(R.id.ivSheetIcon)
         val tvTitle = sheetView.findViewById<TextView>(R.id.tvSheetTitle)
+        val tvSubtitle = sheetView.findViewById<TextView>(R.id.tvSheetSubtitle)
+        tvSubtitle?.text = "1-tap shortcut for ${VehicleCatalog.getLocalizedBikeName(appSettings.getActiveBikeProfile(), appSettings.getActiveCountryProfile())}"
         val tvOptionMapsTitle = sheetView.findViewById<TextView>(R.id.tvOptionMapsTitle)
         val cardOptionMapsSaved = sheetView.findViewById<MaterialCardView>(R.id.cardOptionMapsSaved)
         val cardOptionPinGps = sheetView.findViewById<MaterialCardView>(R.id.cardOptionPinGps)
@@ -4696,11 +3506,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateFuelPriceUi() {
         val currSymbol = appSettings.currentCurrencySymbol
-        binding.tvFuelPriceTitle.text = String.format(Locale.US, "Fuel Price: %s%.2f / L", currSymbol, appSettings.petrolPricePerLiter)
-        binding.tvFuelPriceCountrySubtitle.text = "Tap to update default ${appSettings.currentCurrencyCode} rate"
-        binding.tvFuelPriceTitle.setTextColor(currentTheme.textPrimaryColor)
-        binding.tvFuelPriceCountrySubtitle.setTextColor(currentTheme.textSecondaryColor)
-        binding.tvEditFuelPriceAction.setTextColor(currentTheme.accentColor)
+        binding.tabFuel.tvFuelPriceTitle.text = String.format(Locale.US, "Fuel Price: %s%.2f / L", currSymbol, appSettings.petrolPricePerLiter)
+        binding.tabFuel.tvFuelPriceCountrySubtitle.text = "Tap to update default ${appSettings.currentCurrencyCode} rate"
+        binding.tabFuel.tvFuelPriceTitle.setTextColor(currentTheme.textPrimaryColor)
+        binding.tabFuel.tvFuelPriceCountrySubtitle.setTextColor(currentTheme.textSecondaryColor)
+        binding.tabFuel.tvEditFuelPriceAction.setTextColor(currentTheme.accentColor)
     }
 
     private fun showEditPetrolPriceDialog() {
@@ -4919,19 +3729,19 @@ class MainActivity : AppCompatActivity() {
     private fun updateTelephonyPermissionsUi() {
         val missing = getMissingTelephonyPermissions()
         if (missing.isEmpty()) {
-            binding.tvTelephonyPermsStatus.text = "All Granted (Favs, Recents, Dialback, SMS, POI GPS)"
-            binding.tvTelephonyPermsStatus.setTextColor(ContextCompat.getColor(this, R.color.mint_accent))
+            binding.tabAccount.tvTelephonyPermsStatus.text = "All Granted (Favs, Recents, Dialback, SMS, POI GPS)"
+            binding.tabAccount.tvTelephonyPermsStatus.setTextColor(ContextCompat.getColor(this, R.color.mint_accent))
         } else {
             val shortNames = missing.joinToString(", ") { it.substringAfterLast('.') }
-            binding.tvTelephonyPermsStatus.text = "Tap to grant: $shortNames"
-            binding.tvTelephonyPermsStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+            binding.tabAccount.tvTelephonyPermsStatus.text = "Tap to grant: $shortNames"
+            binding.tabAccount.tvTelephonyPermsStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
         }
     }
 
     private fun updateSmsRejectUi() {
-        binding.switchSmsReject.isChecked = appSettings.isSmsRejectEnabled
+        binding.tabAccount.switchSmsReject.isChecked = appSettings.isSmsRejectEnabled
         val msg = appSettings.smsRejectMessage.trim().ifBlank { com.pulsarnav.app.data.AppSettings.DEFAULT_REJECT_SMS_TEMPLATE }
-        binding.tvSmsRejectSummary.text = if (appSettings.isSmsRejectEnabled) {
+        binding.tabAccount.tvSmsRejectSummary.text = if (appSettings.isSmsRejectEnabled) {
             "Reply: \"$msg\""
         } else {
             "Off (Template: \"$msg\")"
@@ -4988,28 +3798,28 @@ class MainActivity : AppCompatActivity() {
         if (!isConnected) {
             when {
                 !hasPerms -> {
-                    binding.tvSubStatus.text = "Permissions needed: Tap PERMS NEEDED above"
-                    binding.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+                    binding.tabCockpit.tvSubStatus.text = "Permissions needed: Tap PERMS NEEDED above"
+                    binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
                 }
                 !isBtOn && isGpsRequiredForBle && !isGpsOn -> {
-                    binding.tvSubStatus.text = "Turn ON Bluetooth & GPS in Quick Settings"
-                    binding.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+                    binding.tabCockpit.tvSubStatus.text = "Turn ON Bluetooth & GPS in Quick Settings"
+                    binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
                 }
                 !isBtOn -> {
-                    binding.tvSubStatus.text = "Turn ON Bluetooth in Quick Settings"
-                    binding.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+                    binding.tabCockpit.tvSubStatus.text = "Turn ON Bluetooth in Quick Settings"
+                    binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
                 }
                 isGpsRequiredForBle && !isGpsOn -> {
-                    binding.tvSubStatus.text = "Turn ON Location (GPS) in Quick Settings"
-                    binding.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
+                    binding.tabCockpit.tvSubStatus.text = "Turn ON Location (GPS) in Quick Settings"
+                    binding.tabCockpit.tvSubStatus.setTextColor(ContextCompat.getColor(this, R.color.amber_accent))
                 }
                 else -> {
-                    binding.tvSubStatus.text = if (bleManager.isAutoConnectEnabled) {
+                    binding.tabCockpit.tvSubStatus.text = if (bleManager.isAutoConnectEnabled) {
                         "Auto-connect active • waiting for bike"
                     } else {
                         "Auto-connect paused • tap Scan to connect"
                     }
-                    binding.tvSubStatus.setTextColor(currentTheme.textTertiaryColor)
+                    binding.tabCockpit.tvSubStatus.setTextColor(currentTheme.textTertiaryColor)
                 }
             }
         }
@@ -5195,75 +4005,75 @@ class MainActivity : AppCompatActivity() {
                 bleManager.connectionState.collectLatest { state ->
                 when (state) {
                     is BleConnectionState.Disconnected -> {
-                        stopStatusDotPulse(binding.viewStatusDot)
+                        stopStatusDotPulse(binding.tabCockpit.viewStatusDot)
                         stopStatusDotPulse(binding.viewTopConnectionDot)
-                        binding.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
-                        binding.tvConnectionStatus.text = "Disconnected"
-                        binding.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
-                        binding.tvSubStatus.text = if (bleManager.isAutoConnectEnabled) {
+                        binding.tabCockpit.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
+                        binding.tabCockpit.tvConnectionStatus.text = "Disconnected"
+                        binding.tabCockpit.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
+                        binding.tabCockpit.tvSubStatus.text = if (bleManager.isAutoConnectEnabled) {
                             "Auto-connect active • waiting for bike"
                         } else {
                             "Auto-connect paused • tap Scan to connect"
                         }
-                        binding.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
-                        binding.btnScan.text = "Scan"
-                        binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
-                        binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
-                        binding.layoutDeviceList.visibility = View.VISIBLE
+                        binding.tabCockpit.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
+                        binding.tabCockpit.btnScan.text = "Scan"
+                        binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
+                        binding.tabCockpit.btnScan.setTextColor(currentTheme.onPrimaryColor)
+                        binding.tabCockpit.rvDeviceList.visibility = View.VISIBLE
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
                         binding.tvTopConnectionStatus.text = "OFFLINE"
                         binding.tvTopConnectionStatus.setTextColor(currentTheme.textTertiaryColor)
                     }
                     is BleConnectionState.Scanning -> {
-                        startStatusDotPulse(binding.viewStatusDot)
+                        startStatusDotPulse(binding.tabCockpit.viewStatusDot)
                         startStatusDotPulse(binding.viewTopConnectionDot)
-                        binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
-                        binding.tvConnectionStatus.text = "Searching for bike..."
-                        binding.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
-                        binding.tvSubStatus.text = "Auto-scanning • ensure bike ignition is ON"
-                        binding.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
-                        binding.btnScan.text = "Stop"
-                        binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
-                        binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
-                        binding.layoutDeviceList.visibility = View.VISIBLE
+                        binding.tabCockpit.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
+                        binding.tabCockpit.tvConnectionStatus.text = "Searching for bike..."
+                        binding.tabCockpit.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
+                        binding.tabCockpit.tvSubStatus.text = "Auto-scanning • ensure bike ignition is ON"
+                        binding.tabCockpit.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
+                        binding.tabCockpit.btnScan.text = "Stop"
+                        binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
+                        binding.tabCockpit.btnScan.setTextColor(currentTheme.onPrimaryColor)
+                        binding.tabCockpit.rvDeviceList.visibility = View.VISIBLE
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
                         binding.tvTopConnectionStatus.text = "SEARCHING"
                         binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
                     }
                     is BleConnectionState.Connecting -> {
-                        startStatusDotPulse(binding.viewStatusDot)
+                        startStatusDotPulse(binding.tabCockpit.viewStatusDot)
                         startStatusDotPulse(binding.viewTopConnectionDot)
-                        binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
-                        binding.tvConnectionStatus.text = "Connecting..."
-                        binding.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
-                        binding.tvSubStatus.text = state.deviceName
-                        binding.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
-                        binding.btnScan.text = "Cancel"
-                        binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-                        binding.btnScan.setTextColor(currentTheme.accentColor)
+                        binding.tabCockpit.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
+                        binding.tabCockpit.tvConnectionStatus.text = "Connecting..."
+                        binding.tabCockpit.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
+                        binding.tabCockpit.tvSubStatus.text = state.deviceName
+                        binding.tabCockpit.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
+                        binding.tabCockpit.btnScan.text = "Cancel"
+                        binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+                        binding.tabCockpit.btnScan.setTextColor(currentTheme.accentColor)
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_scanning)
                         binding.tvTopConnectionStatus.text = "CONNECTING"
                         binding.tvTopConnectionStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
                     }
                     is BleConnectionState.Connected -> {
-                        stopStatusDotPulse(binding.viewStatusDot)
+                        stopStatusDotPulse(binding.tabCockpit.viewStatusDot)
                         stopStatusDotPulse(binding.viewTopConnectionDot)
                         BikeBleForegroundService.start(this@MainActivity)
                         val isTft = bleManager.isConnectedToTftCluster()
                         val clusterTypeLabel = if (isTft) "TFT" else "LCD"
-                        binding.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
-                        binding.tvConnectionStatus.text = "Connected ($clusterTypeLabel) • ${state.deviceName}"
-                        binding.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
-                        binding.tvSubStatus.text = "Cluster synced (${state.address})"
-                        binding.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
-                        binding.btnScan.text = "Disconnect"
-                        binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-                        binding.btnScan.setTextColor(currentTheme.accentColor)
-                        binding.layoutDeviceList.visibility = View.GONE
-                        binding.btnSyncPhonebookCalls.visibility = if (isTft) View.VISIBLE else View.GONE
+                        binding.tabCockpit.viewStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
+                        binding.tabCockpit.tvConnectionStatus.text = "Connected ($clusterTypeLabel) • ${state.deviceName}"
+                        binding.tabCockpit.tvConnectionStatus.setTextColor(currentTheme.textPrimaryColor)
+                        binding.tabCockpit.tvSubStatus.text = "Cluster synced (${state.address})"
+                        binding.tabCockpit.tvSubStatus.setTextColor(currentTheme.textSecondaryColor)
+                        binding.tabCockpit.btnScan.text = "Disconnect"
+                        binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+                        binding.tabCockpit.btnScan.setTextColor(currentTheme.accentColor)
+                        binding.tabCockpit.rvDeviceList.visibility = View.GONE
+                        binding.tabAccount.btnSyncPhonebookCalls.visibility = if (isTft) View.VISIBLE else View.GONE
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
                         binding.tvTopConnectionStatus.text = if (isTft) "TFT CONNECTED" else "LCD CONNECTED"
@@ -5272,13 +4082,13 @@ class MainActivity : AppCompatActivity() {
                         recordSyncTime()
                     }
                     is BleConnectionState.Error -> {
-                        stopStatusDotPulse(binding.viewStatusDot)
+                        stopStatusDotPulse(binding.tabCockpit.viewStatusDot)
                         stopStatusDotPulse(binding.viewTopConnectionDot)
-                        binding.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
-                        binding.tvConnectionStatus.text = state.message
-                        binding.btnScan.text = "Scan"
-                        binding.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
-                        binding.btnScan.setTextColor(currentTheme.onPrimaryColor)
+                        binding.tabCockpit.viewStatusDot.backgroundTintList = ColorStateList.valueOf(currentTheme.accentColor)
+                        binding.tabCockpit.tvConnectionStatus.text = state.message
+                        binding.tabCockpit.btnScan.text = "Scan"
+                        binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.primaryColor)
+                        binding.tabCockpit.btnScan.setTextColor(currentTheme.onPrimaryColor)
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
                         binding.tvTopConnectionStatus.text = "OFFLINE"
@@ -5302,11 +4112,11 @@ class MainActivity : AppCompatActivity() {
                 bleManager.lastSentPacket.collectLatest { packet ->
                     if (packet != null) {
                         val compactHex = DebugLogRepository.toCompactHex(packet, maxBytes = 12)
-                        binding.tvPacketHex.text = "Last Frame (${packet.size}B): $compactHex • payload redacted"
-                        binding.tvPacketDecoded.text = "Decoded: ${DebugLogRepository.summarizeBlePacket(packet)}"
+                        binding.tabAccount.tvPacketHex.text = "Last Frame (${packet.size}B): $compactHex • payload redacted"
+                        binding.tabAccount.tvPacketDecoded.text = "Decoded: ${DebugLogRepository.summarizeBlePacket(packet)}"
                     } else {
-                        binding.tvPacketHex.text = "Last BLE Packet: None"
-                        binding.tvPacketDecoded.text = "Decoded: Waiting for BLE frame..."
+                        binding.tabAccount.tvPacketHex.text = "Last BLE Packet: None"
+                        binding.tabAccount.tvPacketDecoded.text = "Decoded: Waiting for BLE frame..."
                     }
                 }
             }
@@ -5326,7 +4136,7 @@ class MainActivity : AppCompatActivity() {
                     TftMirrorStatus.CONNECTING_WIFI, TftMirrorStatus.WIFI_CONNECTED_WAITING_TCP -> R.color.status_scanning
                     TftMirrorStatus.IDLE, TftMirrorStatus.ERROR -> R.color.status_disconnected
                 }
-                binding.viewTftWifiDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, dotRes)
+                binding.tabCockpit.viewTftWifiDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, dotRes)
 
                 val targetSsid = mirror.ssid.ifBlank {
                     appSettings.tftWifiSsid.ifBlank {
@@ -5335,7 +4145,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 val isOtcConnected = (ble is BleConnectionState.Connected) && !bleManager.isConnectedToTftCluster()
 
-                binding.tvTftWifiStatus.text = when (mirror.status) {
+                binding.tabCockpit.tvTftWifiStatus.text = when (mirror.status) {
                     TftMirrorStatus.IDLE -> {
                         if (isOtcConnected) {
                             "OTC LCD cluster connected • Wi-Fi mirror is for TFT (NS400Z)"
@@ -5364,7 +4174,7 @@ class MainActivity : AppCompatActivity() {
                     TftMirrorStatus.ERROR -> "Error • Check Wi-Fi / VIN config"
                 }
 
-                binding.tvTftWifiMeta.text = when {
+                binding.tabCockpit.tvTftWifiMeta.text = when {
                     !mirror.errorMessage.isNullOrBlank() -> mirror.errorMessage
                     active && mirror.framesSent > 0 -> {
                         val parkTag = if (mirror.isBikeStationary) "Stationary" else "Moving"
@@ -5388,9 +4198,9 @@ class MainActivity : AppCompatActivity() {
 
                 val isHandshaking = mirror.status == TftMirrorStatus.CONNECTING_WIFI ||
                     mirror.status == TftMirrorStatus.WIFI_CONNECTED_WAITING_TCP
-                binding.progressTftHandshake.visibility = if (isHandshaking) View.VISIBLE else View.GONE
+                binding.tabCockpit.progressTftHandshake.visibility = if (isHandshaking) View.VISIBLE else View.GONE
                 if (isHandshaking) {
-                    binding.progressTftHandshake.setIndicatorColor(
+                    binding.tabCockpit.progressTftHandshake.setIndicatorColor(
                         if (mirror.status == TftMirrorStatus.CONNECTING_WIFI)
                             ContextCompat.getColor(this@MainActivity, R.color.amber_accent)
                         else
@@ -5402,18 +4212,18 @@ class MainActivity : AppCompatActivity() {
                 val isHeadlessActive = active && mirror.source != TftMirrorSource.LIVE_SCREEN_CAST
 
                 val prefIdleBtn = if (appSettings.tftMirrorMode == AppSettings.TFT_MODE_HUD) "HUD Mirror\n(Screen Off)" else "Live Map (800×480)\n(Google Maps Sync)"
-                binding.btnToggleTftHudMirror.text = when {
+                binding.tabCockpit.btnToggleTftHudMirror.text = when {
                     isHeadlessActive -> "Stop Mirror"
                     isScreenCastActive -> "Switch to\nLive Map"
                     else -> prefIdleBtn
                 }
-                binding.btnCastLiveScreen.text = when {
+                binding.tabCockpit.btnCastLiveScreen.text = when {
                     isScreenCastActive -> "Stop Cast"
                     isHeadlessActive -> "Switch to\nScreen Cast"
                     else -> "Cast Google Maps\n(Screen Mirror)"
                 }
-                binding.btnToggleTftHudMirror.isEnabled = !isHandshaking && !isOtcConnected
-                binding.btnCastLiveScreen.isEnabled = !isHandshaking && !isOtcConnected
+                binding.tabCockpit.btnToggleTftHudMirror.isEnabled = !isHandshaking && !isOtcConnected
+                binding.tabCockpit.btnCastLiveScreen.isEnabled = !isHandshaking && !isOtcConnected
 
                 val isLiveCast = active && mirror.source == TftMirrorSource.LIVE_SCREEN_CAST
                 if (isLiveCast) {
@@ -5436,1221 +4246,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupTftAndLogDebugger() {
-        val wifiMgr = TftWifiMirrorManager.getInstance(this)
-        val dbg = binding.labsTftDebug
+    private fun setupTftAndLogDebugger() = tftLabsController.setup()
 
-        attachTftTouchMapper(dbg.ivTftDebugPreview) { x, y ->
-            val live = wifiMgr.mirrorState.value.status != TftMirrorStatus.IDLE &&
-                wifiMgr.mirrorState.value.status != TftMirrorStatus.ERROR
-            if (!wifiMgr.isLocalPreviewActiveFlow.value && !live) {
-                showFeedback("Tap 'Start Preview' first to interact with the cluster")
-                return@attachTftTouchMapper
-            }
-            wifiMgr.simulateClusterTouch(9, x, y)
-            dbg.tvTftDbgTouchInfo.text = "Touch mapped @ ($x, $y) on 800×480"
-        }
+    private fun showTftWifiConfigDialog() = navigationHubController.showTftWifiConfigDialog()
 
-        dbg.btnTftDbgTogglePreview.setOnClickListener {
-            provideHapticFeedback()
-            if (wifiMgr.isLocalPreviewActiveFlow.value) {
-                wifiMgr.stopLocalDebugPreview()
-            } else {
-                wifiMgr.startLocalDebugPreview()
-                showFeedback("800×480 Local TFT Preview started")
-            }
-        }
+    private fun startTftRouteFromSharedInput(rawInput: String) =
+        navigationHubController.showNavigationHubBottomSheet(initialInput = rawInput, autoStart = true)
 
-        dbg.btnTftDbgFullscreen.setOnClickListener {
-            provideHapticFeedback()
-            if (!wifiMgr.isLocalPreviewActiveFlow.value &&
-                wifiMgr.mirrorState.value.status == TftMirrorStatus.IDLE
-            ) {
-                wifiMgr.startLocalDebugPreview()
-            }
-            showFullscreenTftDebuggerDialog()
-        }
+    private fun showDestinationSearchAndRouteDialog() =
+        navigationHubController.showNavigationHubBottomSheet()
 
-        dbg.btnTftDbgNavV2Test.setOnClickListener {
-            provideHapticFeedback()
-            wifiMgr.runNavV2LoopbackDiagnostics()
-            showFeedback("NAV_V2 loopback suite queued — check Log Console")
-        }
+    private fun showNavigationHubBottomSheet(initialInput: String? = null, autoStart: Boolean = false) =
+        navigationHubController.showNavigationHubBottomSheet(initialInput, autoStart)
 
-        dbg.btnTftDbgRecenter.setOnClickListener {
-            provideHapticFeedback()
-            wifiMgr.startLocalDebugPreview()
-            wifiMgr.simulateHandlebarRecenter()
-        }
-
-        dbg.btnTftDbgDaylight.setOnClickListener {
-            provideHapticFeedback()
-            wifiMgr.startLocalDebugPreview()
-            val highContrast = wifiMgr.toggleDebugDaylightContrast()
-            dbg.btnTftDbgDaylight.text = if (highContrast) "🌙 Night UI" else "☀ Daylight"
-        }
-
-        dbg.btnTftDbgMotion.setOnClickListener {
-            provideHapticFeedback()
-            wifiMgr.startLocalDebugPreview()
-            val stationary = wifiMgr.toggleDebugStationaryMode()
-            dbg.btnTftDbgMotion.text = if (stationary) "PARK ✓" else "RIDE ✓"
-        }
-
-        dbg.btnTftDbgHitboxes.setOnClickListener {
-            provideHapticFeedback()
-            wifiMgr.startLocalDebugPreview()
-            val guides = wifiMgr.toggleDebugHitboxOverlay()
-            dbg.btnTftDbgHitboxes.text = if (guides) "⊞ Guides ON" else "⊞ Guides"
-        }
-
-        // Yield smoothly back to outer NestedScrollView when inner log console cannot scroll in drag direction
-        var lastLogTouchY = 0f
-        dbg.scrollDebugLogs.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastLogTouchY = event.y
-                    val canScroll = v.canScrollVertically(1) || v.canScrollVertically(-1)
-                    v.parent?.requestDisallowInterceptTouchEvent(canScroll)
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dy = event.y - lastLogTouchY
-                    lastLogTouchY = event.y
-                    val canConsume = when {
-                        dy > 0f -> v.canScrollVertically(-1)
-                        dy < 0f -> v.canScrollVertically(1)
-                        else -> v.canScrollVertically(1) || v.canScrollVertically(-1)
-                    }
-                    v.parent?.requestDisallowInterceptTouchEvent(canConsume)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    v.parent?.requestDisallowInterceptTouchEvent(false)
-            }
-            false
-        }
-
-        val filterButtons = listOf(
-            dbg.btnLogFilterAll to DebugFilter.ALL,
-            dbg.btnLogFilterBle to DebugFilter.BLE,
-            dbg.btnLogFilterWifi to DebugFilter.WIFI_NAV_V2,
-            dbg.btnLogFilterCall to DebugFilter.TELEPHONY,
-            dbg.btnLogFilterMaps to DebugFilter.MAPS,
-            dbg.btnLogFilterErr to DebugFilter.ERRORS
-        )
-        for ((btn, filter) in filterButtons) {
-            btn.setOnClickListener {
-                provideHapticFeedback()
-                activeDebugFilter = filter
-                updateDebugFilterChipsUi()
-                renderDebugLogsUi(DebugLogRepository.entries.value, forceRender = true)
-            }
-        }
-
-        dbg.btnLogPauseResume.setOnClickListener {
-            provideHapticFeedback()
-            isDebugLogPaused = !isDebugLogPaused
-            dbg.btnLogPauseResume.text = if (isDebugLogPaused) "▶ Resume" else "⏸ Pause"
-            if (!isDebugLogPaused) {
-                renderDebugLogsUi(DebugLogRepository.entries.value, forceRender = true)
-            }
-        }
-
-        dbg.btnLogCopy.setOnClickListener {
-            provideHapticFeedback()
-            lifecycleScope.launch {
-                val (count, payload) = withContext(Dispatchers.Default) {
-                    val filtered = DebugLogRepository.filterEntries(DebugLogRepository.entries.value, activeDebugFilter)
-                    val formatted = DebugLogRepository.formatLogsForExport(
-                        filtered,
-                        headerInfo = "${bleManager.getDebugDiagnosticsSummary()} • Model=${appSettings.selectedModelId}"
-                    )
-                    filtered.size to formatted
-                }
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("PulsarNav Logs", payload))
-                showFeedback("Copied $count filtered log entries")
-            }
-        }
-
-        dbg.btnLogShare.setOnClickListener {
-            provideHapticFeedback()
-            shareDebugLogText()
-        }
-
-        dbg.btnLogClear.setOnClickListener {
-            provideHapticFeedback()
-            DebugLogRepository.clear()
-            renderDebugLogsUi(emptyList(), forceRender = true)
-            showFeedback("Debug log buffer cleared")
-        }
-
-        suspend fun renderFrameIfVisible(
-            frame: com.pulsarnav.app.wifi.TftDebugFrame?,
-            mirrorState: com.pulsarnav.app.wifi.TftMirrorState,
-            anyActive: Boolean,
-            accountVisible: Boolean
-        ) {
-            if (frame != null && anyActive) {
-                val fullscreenVisible = fullscreenTftDialog?.isShowing == true
-                if (accountVisible && frame.frameIndex != lastDecodedFrameIndex) {
-                    val targetSlot = (previewBitmapSlotIdx + 1) % previewBitmapSlots.size
-                    val bmp = decodeSlotBitmap(frame, previewBitmapSlots, targetSlot)
-                    if (bmp != null && isAccountTabVisible.value && !isDestroyed && !isFinishing) {
-                        dbg.ivTftDebugPreview.setImageBitmap(bmp)
-                        dbg.layoutTftDebugEmpty.visibility = View.GONE
-                        previewBitmapSlotIdx = targetSlot
-                        lastDecodedFrameIndex = frame.frameIndex
-                    }
-                }
-                if (fullscreenVisible && frame.frameIndex != lastFullscreenFrameIndex) {
-                    val targetFullSlot = (fullscreenBitmapSlotIdx + 1) % fullscreenBitmapSlots.size
-                    val fullBmp = decodeSlotBitmap(frame, fullscreenBitmapSlots, targetFullSlot)
-                    val ivFull = fullscreenTftImageView
-                    if (fullBmp != null && ivFull != null && fullscreenTftDialog?.isShowing == true) {
-                        ivFull.setImageBitmap(fullBmp)
-                        fullscreenBitmapSlotIdx = targetFullSlot
-                        lastFullscreenFrameIndex = frame.frameIndex
-                    }
-                }
-                if (accountVisible || fullscreenVisible) {
-                    val kb = frame.byteSize / 1024f
-                    val motionBadge = if (mirrorState.isBikeStationary) "PARK" else "RIDE"
-                    val metricsText = String.format(
-                        Locale.US,
-                        "%dx%d • %.1f KB / 30 KB • Q=%d • #%d • %s",
-                        frame.width,
-                        frame.height,
-                        kb,
-                        frame.quality,
-                        frame.frameIndex,
-                        motionBadge
-                    )
-                    if (accountVisible) {
-                        dbg.tvTftDbgMetrics.text = metricsText
-                        dbg.pbTftJpegBudget.progress =
-                            frame.byteSize.coerceIn(0, TftWifiProtocol.UDP_MAX_JPEG_BYTES)
-                    }
-                    fullscreenTftMetricsView?.text = metricsText
-                }
-            } else if (!anyActive) {
-                lastDecodedFrameIndex = -1L
-                lastFullscreenFrameIndex = -1L
-                dbg.layoutTftDebugEmpty.visibility = View.VISIBLE
-                dbg.pbTftJpegBudget.progress = 0
-                dbg.tvTftDbgMetrics.text = "800×480 • Idle • JPEG budget <= 30 KB"
-            }
-        }
-
-        // Collect 800x480 TFT controls/stats and frame decodes independently so 1s FPS updates do not cancel bitmap decodes
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch {
-                    combine(
-                        wifiMgr.mirrorState,
-                        wifiMgr.isLocalPreviewActiveFlow
-                    ) { mirrorState, localActive ->
-                        mirrorState to localActive
-                    }.collect { (mirrorState, localActive) ->
-                        val liveWifi = mirrorState.status != TftMirrorStatus.IDLE &&
-                            mirrorState.status != TftMirrorStatus.ERROR
-                        val anyActive = liveWifi || localActive
-
-                        dbg.btnTftDbgTogglePreview.text = when {
-                            liveWifi -> "Live Wi-Fi Active"
-                            localActive -> "⏹ Stop Preview"
-                            else -> "▶ Start Preview"
-                        }
-
-                        dbg.tvTftDbgStatus.text = when {
-                            liveWifi -> "LIVE WI-FI"
-                            localActive -> "LOCAL PREVIEW"
-                            else -> "IDLE"
-                        }
-                        dbg.tvTftDbgStatus.setTextColor(
-                            if (anyActive) ContextCompat.getColor(this@MainActivity, R.color.status_connected)
-                            else currentTheme.textSecondaryColor
-                        )
-
-                        val touchSummary = mirrorState.lastTouchInfo.ifBlank { "None" }
-                        dbg.tvTftDbgTouchInfo.text = "Last Cluster Input: $touchSummary"
-                        fullscreenTftTouchView?.text = "Input: $touchSummary"
-
-                        if (!anyActive) {
-                            renderFrameIfVisible(null, mirrorState, anyActive = false, accountVisible = isAccountTabVisible.value)
-                        }
-                    }
-                }
-
-                launch {
-                    combine(
-                        wifiMgr.latestDebugFrame,
-                        isAccountTabVisible,
-                        wifiMgr.isLocalPreviewActiveFlow
-                    ) { frame, accountVisible, localActive ->
-                        Triple(frame, accountVisible, localActive)
-                    }.collectLatest { (frame, accountVisible, localActive) ->
-                        val mirrorState = wifiMgr.mirrorState.value
-                        val liveWifi = mirrorState.status != TftMirrorStatus.IDLE &&
-                            mirrorState.status != TftMirrorStatus.ERROR
-                        val anyActive = liveWifi || localActive
-                        renderFrameIfVisible(frame, mirrorState, anyActive, accountVisible)
-                    }
-                }
-
-                // Automatically refresh local 800x480 TFT bench whenever Labs sims / Maps / Call / Media change
-                launch {
-                    combine(
-                        GoogleMapsNotificationListener.currentNavStep,
-                        bleManager.simulatedNavStep,
-                        bleManager.simulatedAlert,
-                        callManager.callInfo
-                    ) { _, _, _, _ -> Unit }.collectLatest {
-                        wifiMgr.refreshDebugCockpitFrame()
-                    }
-                }
-
-                // Collect live protocol & system logs + BLE diagnostics banner
-                launch {
-                    DebugLogRepository.entries.collectLatest { entries ->
-                        renderDebugLogsUi(entries, forceRender = false)
-                    }
-                }
-            }
-        }
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private fun attachTftTouchMapper(imageView: ImageView, onMappedTouch: (Int, Int) -> Unit) {
-        val touchSlop = android.view.ViewConfiguration.get(imageView.context).scaledTouchSlop.toFloat()
-        var downX = 0f
-        var downY = 0f
-        var movedBeyondSlop = false
-
-        imageView.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.x
-                    downY = event.y
-                    movedBeyondSlop = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (!movedBeyondSlop &&
-                        kotlin.math.hypot(event.x - downX, event.y - downY) > touchSlop
-                    ) {
-                        movedBeyondSlop = true
-                    }
-                    !movedBeyondSlop
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (movedBeyondSlop) return@setOnTouchListener false
-                    val w = v.width
-                    val h = v.height
-                    if (w <= 0 || h <= 0 || event.x < 0f || event.x >= w || event.y < 0f || event.y >= h) {
-                        return@setOnTouchListener false
-                    }
-                    val x = ((event.x / w.toFloat()) * TftWifiProtocol.TFT_WIDTH).roundToInt()
-                        .coerceIn(0, TftWifiProtocol.TFT_WIDTH - 1)
-                    val y = ((event.y / h.toFloat()) * TftWifiProtocol.TFT_HEIGHT).roundToInt()
-                        .coerceIn(0, TftWifiProtocol.TFT_HEIGHT - 1)
-                    provideHapticFeedback()
-                    onMappedTouch(x, y)
-                    v.performClick()
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    movedBeyondSlop = true
-                    false
-                }
-                else -> false
-            }
-        }
-    }
-
-    private suspend fun decodeSlotBitmap(
-        frame: com.pulsarnav.app.wifi.TftDebugFrame,
-        slots: Array<Bitmap?>,
-        targetSlot: Int
-    ): Bitmap? = withContext(Dispatchers.Default) {
-        synchronized(previewDecodeLock) {
-            val reusable = slots[targetSlot]
-            val opts = BitmapFactory.Options().apply {
-                inMutable = true
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-                if (reusable != null && !reusable.isRecycled &&
-                    reusable.width == frame.width && reusable.height == frame.height
-                ) {
-                    inBitmap = reusable
-                }
-            }
-            val decoded = try {
-                BitmapFactory.decodeByteArray(frame.jpegBytes, 0, frame.jpegBytes.size, opts)
-            } catch (_: IllegalArgumentException) {
-                opts.inBitmap = null
-                BitmapFactory.decodeByteArray(frame.jpegBytes, 0, frame.jpegBytes.size, opts)
-            }
-            if (decoded != null) {
-                slots[targetSlot] = decoded
-            }
-            decoded
-        }
-    }
-
-    private fun showFullscreenTftDebuggerDialog() {
-        fullscreenTftDialog?.dismiss()
-        val wifiMgr = TftWifiMirrorManager.getInstance(this)
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#080B10"))
-            setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12))
-        }
-
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val tvTitle = TextView(this).apply {
-            text = "800×480 TFT LIVE BENCH"
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tvTouch = TextView(this).apply {
-            text = "Tap display to inspect touch (x,y)"
-            setTextColor(Color.parseColor("#38BDF8"))
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setPadding(0, 0, dpToPx(8), 0)
-        }
-        val btnClose = MaterialButton(this).apply {
-            text = "Close"
-            insetTop = 0
-            insetBottom = 0
-            minWidth = 0
-            minimumWidth = 0
-            maxLines = 1
-            setPadding(dpToPx(12), dpToPx(6), dpToPx(12), dpToPx(6))
-            setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(Color.parseColor("#1E293B"))
-            setOnClickListener { dialog.dismiss() }
-        }
-        topBar.addView(tvTitle)
-        topBar.addView(tvTouch)
-        topBar.addView(btnClose)
-        root.addView(topBar)
-
-        val previewFrame = androidx.constraintlayout.widget.ConstraintLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            ).apply {
-                topMargin = dpToPx(8)
-                bottomMargin = dpToPx(8)
-            }
-        }
-        val ivFull = ImageView(this).apply {
-            id = View.generateViewId()
-            scaleType = ImageView.ScaleType.FIT_XY
-            setBackgroundColor(Color.parseColor("#0F172A"))
-            layoutParams = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0).apply {
-                startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                dimensionRatio = "5:3"
-            }
-        }
-        previewFrame.addView(ivFull)
-        root.addView(previewFrame)
-
-        val tvMetrics = TextView(this).apply {
-            text = binding.labsTftDebug.tvTftDbgMetrics.text
-            setTextColor(Color.parseColor("#CBD5E1"))
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setPadding(0, 0, 0, dpToPx(6))
-        }
-        root.addView(tvMetrics)
-
-        val actionBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        fun addBarBtn(label: String, onClick: () -> Unit) {
-            val b = MaterialButton(this).apply {
-                text = label
-                textSize = 11f
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                insetTop = 0
-                insetBottom = 0
-                minWidth = 0
-                minimumWidth = 0
-                minimumHeight = 0
-                setPadding(dpToPx(4), 0, dpToPx(4), 0)
-                setTextColor(Color.WHITE)
-                backgroundTintList = ColorStateList.valueOf(Color.parseColor("#1E293B"))
-                layoutParams = LinearLayout.LayoutParams(0, dpToPx(40), 1f).apply {
-                    marginEnd = dpToPx(4)
-                }
-                setOnClickListener {
-                    provideHapticFeedback()
-                    onClick()
-                }
-            }
-            actionBar.addView(b)
-        }
-        addBarBtn("Recenter") { wifiMgr.simulateHandlebarRecenter() }
-        addBarBtn("Day/Night") { wifiMgr.toggleDebugDaylightContrast() }
-        addBarBtn("Park/Ride") { wifiMgr.toggleDebugStationaryMode() }
-        addBarBtn("Guides") { wifiMgr.toggleDebugHitboxOverlay() }
-        addBarBtn("NAV_V2") { wifiMgr.runNavV2LoopbackDiagnostics() }
-        root.addView(actionBar)
-
-        attachTftTouchMapper(ivFull) { x, y ->
-            wifiMgr.simulateClusterTouch(9, x, y)
-            tvTouch.text = "Touch @ ($x, $y)"
-        }
-
-        // Seed currently cached frame asynchronously using the fullscreen bitmap pool
-        wifiMgr.latestDebugFrame.value?.let { frame ->
-            lifecycleScope.launch {
-                val targetFullSlot = (fullscreenBitmapSlotIdx + 1) % fullscreenBitmapSlots.size
-                val seeded = decodeSlotBitmap(frame, fullscreenBitmapSlots, targetFullSlot)
-                if (seeded != null && dialog.isShowing && ivFull === fullscreenTftImageView) {
-                    ivFull.setImageBitmap(seeded)
-                    fullscreenBitmapSlotIdx = targetFullSlot
-                    lastFullscreenFrameIndex = frame.frameIndex
-                }
-            }
-        }
-
-        fullscreenTftImageView = ivFull
-        fullscreenTftMetricsView = tvMetrics
-        fullscreenTftTouchView = tvTouch
-        fullscreenTftDialog = dialog
-
-        dialog.setOnDismissListener {
-            if (fullscreenTftDialog === dialog) {
-                fullscreenTftDialog = null
-                fullscreenTftImageView = null
-                fullscreenTftMetricsView = null
-                fullscreenTftTouchView = null
-                lastFullscreenFrameIndex = -1L
-                if (!isAccountTabVisible.value && wifiMgr.isLocalPreviewActiveFlow.value) {
-                    wifiMgr.stopLocalDebugPreview()
-                }
-            }
-        }
-        dialog.setContentView(root)
-        dialog.show()
-    }
-
-    private fun updateDebugFilterChipsUi() {
-        val theme = currentTheme
-        val dbg = binding.labsTftDebug
-        val chips = listOf(
-            dbg.btnLogFilterAll to DebugFilter.ALL,
-            dbg.btnLogFilterBle to DebugFilter.BLE,
-            dbg.btnLogFilterWifi to DebugFilter.WIFI_NAV_V2,
-            dbg.btnLogFilterCall to DebugFilter.TELEPHONY,
-            dbg.btnLogFilterMaps to DebugFilter.MAPS,
-            dbg.btnLogFilterErr to DebugFilter.ERRORS
-        )
-        for ((btn, filter) in chips) {
-            val selected = activeDebugFilter == filter
-            if (selected) {
-                btn.backgroundTintList = ColorStateList.valueOf(theme.primaryColor)
-                btn.strokeColor = ColorStateList.valueOf(theme.primaryColor)
-                btn.setTextColor(theme.onPrimaryColor)
-            } else {
-                btn.backgroundTintList = ColorStateList.valueOf(theme.subtleColor)
-                btn.strokeColor = ColorStateList.valueOf(theme.cardBorderColor)
-                btn.setTextColor(theme.textSecondaryColor)
-            }
-        }
-    }
-
-    private fun renderDebugLogsUi(entries: List<com.pulsarnav.app.debug.DebugLogEntry>, forceRender: Boolean) {
-        if (!forceRender && !isAccountTabVisible.value) return
-        val dbg = binding.labsTftDebug
-        dbg.tvBleDiagBanner.text = bleManager.getDebugDiagnosticsSummary()
-        val filterSnapshot = activeDebugFilter
-        val errCount = DebugLogRepository.errorCount.value
-
-        if (isDebugLogPaused && !forceRender) {
-            val filteredCount = DebugLogRepository.filterEntries(entries, filterSnapshot).size
-            dbg.tvDebugLogStats.text = "$filteredCount/${entries.size} • $errCount err • PAUSED"
-            return
-        }
-
-        renderLogJob?.cancel()
-        renderLogJob = lifecycleScope.launch {
-            val (statsText, formattedText) = withContext(Dispatchers.Default) {
-                val filtered = DebugLogRepository.filterEntries(entries, filterSnapshot)
-                val pauseTag = if (isDebugLogPaused) " • PAUSED" else ""
-                val stats = "${filtered.size}/${entries.size} • $errCount err$pauseTag"
-                val recent = if (filtered.size > 140) filtered.takeLast(140) else filtered
-                val body = if (recent.isEmpty()) {
-                    "No entries matching '${filterSnapshot.label}'. Trigger BLE, TFT preview, or NAV_V2 test."
-                } else {
-                    recent.joinToString("\n") { DebugLogRepository.formatEntryLine(it) }
-                }
-                stats to body
-            }
-
-            if (isDestroyed || isFinishing) return@launch
-            dbg.tvDebugLogStats.text = statsText
-
-            if (formattedText != lastRenderedLogText) {
-                val isFirstRender = lastRenderedLogText == null
-                val inner = dbg.scrollDebugLogs.getChildAt(0)
-                val wasNearBottom = inner == null ||
-                    !dbg.scrollDebugLogs.canScrollVertically(1) ||
-                    (inner.bottom - (dbg.scrollDebugLogs.height + dbg.scrollDebugLogs.scrollY) < dpToPx(24))
-                lastRenderedLogText = formattedText
-                dbg.tvDebugLogOutput.text = formattedText
-
-                // Only auto-scroll INSIDE scrollDebugLogs using focus-safe scrollTo() when user is already
-                // pinned at bottom on an explicit log append — never call fullScroll(FOCUS_DOWN), which
-                // hijacks focus up to outer scrollSettings and yanks the Account page to the bottom.
-                if (!isFirstRender && !isDebugLogPaused && wasNearBottom) {
-                    dbg.scrollDebugLogs.post {
-                        val content = dbg.scrollDebugLogs.getChildAt(0) ?: return@post
-                        val targetY = (content.height - dbg.scrollDebugLogs.height).coerceAtLeast(0)
-                        dbg.scrollDebugLogs.scrollTo(0, targetY)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun shareDebugLogText() {
-        val entriesSnapshot = DebugLogRepository.entries.value
-        val filterSnapshot = activeDebugFilter
-        val header = "PulsarNav v${com.pulsarnav.app.BuildConfig.VERSION_NAME} • Model=${appSettings.selectedModelId} • ${bleManager.getDebugDiagnosticsSummary()}"
-        lifecycleScope.launch {
-            try {
-                val uri = withContext(Dispatchers.IO) {
-                    val filtered = DebugLogRepository.filterEntries(entriesSnapshot, filterSnapshot)
-                    val payload = DebugLogRepository.formatLogsForExport(filtered, headerInfo = header)
-                    val dir = File(cacheDir, "debug_logs").apply { mkdirs() }
-                    val logFile = File(dir, "pulsarnav-log.txt")
-                    logFile.writeText(payload, Charsets.UTF_8)
-                    FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${applicationContext.packageName}.fileprovider",
-                        logFile
-                    )
-                }
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "PulsarNav Diagnostic Log (${activeDebugFilter.label})")
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = ClipData.newRawUri("PulsarNav Diagnostic Log", uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(sendIntent, "Share PulsarNav Diagnostic Log"))
-            } catch (e: Exception) {
-                showFeedback("Unable to open Share sheet: ${e.message}", isAlert = true)
-            }
-        }
-    }
-
-    private fun showTftWifiConfigDialog() {
-        val container = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            val pad = dpToPx(20)
-            setPadding(pad, dpToPx(12), pad, 0)
-        }
-
-        if (!isWifiEnabled()) {
-            val wifiWarningCard = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                val padH = dpToPx(12)
-                val padV = dpToPx(8)
-                setPadding(padH, padV, padH, padV)
-                val amberColor = ContextCompat.getColor(this@MainActivity, R.color.amber_accent)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dpToPx(8).toFloat()
-                    setColor(ColorUtils.setAlphaComponent(amberColor, 35))
-                    setStroke(dpToPx(1), amberColor)
-                }
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(0, 0, 0, dpToPx(12)) }
-            }
-            val tvWarn = android.widget.TextView(this).apply {
-                text = "⚠️ Wi-Fi is turned off on your phone. Turn on Wi-Fi to connect and cast to your cluster."
-                textSize = 12f
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.amber_accent))
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val btnEnable = com.google.android.material.button.MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
-                text = "Turn On"
-                textSize = 12f
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.amber_accent))
-                setOnClickListener {
-                    promptEnableWifi(PendingWifiActionType.CONFIG_DIALOG) { showTftWifiConfigDialog() }
-                }
-            }
-            wifiWarningCard.addView(tvWarn)
-            wifiWarningCard.addView(btnEnable)
-            container.addView(wifiWarningCard)
-        }
-
-        val infoText = android.widget.TextView(this).apply {
-            text = "For Bajaj NS400Z / TFT clusters. Leave SSID blank to auto-use the connected PULSAR device name. If you enter your 17-char VIN, PulsarNav derives the OEM SoftAP WPA2 password automatically."
-            textSize = 12f
-            setTextColor(currentTheme.textSecondaryColor)
-        }
-        container.addView(infoText)
-
-        val etSsid = createThemedEditText("Custom Wi-Fi SSID (optional, e.g. PULSAR1854)").apply {
-            setText(appSettings.tftWifiSsid)
-        }
-        container.addView(etSsid)
-
-        val etVin = createThemedEditText("17-char Bike VIN (for auto WPA2 password)").apply {
-            setText(appSettings.tftWifiVin)
-        }
-        container.addView(etVin)
-
-        val etPass = createThemedEditText("Or manual WPA2 passphrase (optional)").apply {
-            setText(appSettings.tftWifiPassphrase)
-        }
-        container.addView(etPass)
-
-        val tvPreview = android.widget.TextView(this).apply {
-            textSize = 11f
-            setTextColor(currentTheme.accentColor)
-            setPadding(0, dpToPx(8), 0, 0)
-        }
-        fun refreshPreview() {
-            val vin = etVin.text.toString().trim()
-            val manual = etPass.text.toString().trim()
-            tvPreview.text = when {
-                manual.isNotEmpty() -> "Using custom WPA2 passphrase (${manual.length} chars)"
-                vin.isNotEmpty() -> "Derived OEM PSK: ${TftPasswordGenerator.deriveSoftApPassword(vin)}"
-                else -> "Tip: Joining PULSAR Wi-Fi manually in Android Settings works without VIN too."
-            }
-        }
-        refreshPreview()
-        etVin.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { refreshPreview() }
-        })
-        etPass.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { refreshPreview() }
-        })
-        container.addView(tvPreview)
-
-        val tvConsoleHeader = android.widget.TextView(this).apply {
-            text = "Cluster Hardware Type (LCD vs TFT):"
-            textSize = 12f
-            setPadding(0, dpToPx(12), 0, dpToPx(4))
-            setTextColor(currentTheme.textPrimaryColor)
-        }
-        container.addView(tvConsoleHeader)
-
-        val rgConsoleType = android.widget.RadioGroup(this).apply {
-            orientation = android.widget.RadioGroup.VERTICAL
-        }
-        val rbConsoleAuto = android.widget.RadioButton(this).apply {
-            text = "Auto-Detect (GATT Hardware Check • Any Bajaj Model)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        val rbConsoleTft = android.widget.RadioButton(this).apply {
-            text = "Force Color TFT (NS400Z / NS200 TFT / N250 TFT)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        val rbConsoleLcd = android.widget.RadioButton(this).apply {
-            text = "Force Monochrome LCD (NS200 LCD / N250 LCD / Dominar)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        rgConsoleType.addView(rbConsoleAuto)
-        rgConsoleType.addView(rbConsoleTft)
-        rgConsoleType.addView(rbConsoleLcd)
-        when (appSettings.clusterConsoleType) {
-            AppSettings.CLUSTER_CONSOLE_TFT -> rbConsoleTft.isChecked = true
-            AppSettings.CLUSTER_CONSOLE_LCD -> rbConsoleLcd.isChecked = true
-            else -> rbConsoleAuto.isChecked = true
-        }
-        container.addView(rgConsoleType)
-
-        val tvModeHeader = android.widget.TextView(this).apply {
-            text = "Mirror Mode (Screen-Off Safe):"
-            textSize = 12f
-            setPadding(0, dpToPx(12), 0, dpToPx(4))
-            setTextColor(currentTheme.textPrimaryColor)
-        }
-        container.addView(tvModeHeader)
-
-        val rgMirrorMode = android.widget.RadioGroup(this).apply {
-            orientation = android.widget.RadioGroup.VERTICAL
-        }
-        val rbLiveMap = android.widget.RadioButton(this).apply {
-            text = "PulsarNav Live Map (Google Maps TBT Sync • Full 800×480 • Lock-Proof)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        val rbHud = android.widget.RadioButton(this).apply {
-            text = "Cockpit HUD (Minimalist TBT Dashboard • Lock-Proof)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        rgMirrorMode.addView(rbLiveMap)
-        rgMirrorMode.addView(rbHud)
-        if (appSettings.tftMirrorMode == AppSettings.TFT_MODE_LIVE_MAP) rbLiveMap.isChecked = true else rbHud.isChecked = true
-        container.addView(rgMirrorMode)
-
-        val tvCastHeader = android.widget.TextView(this).apply {
-            text = "Cast App NS400Z Safe Viewport & Landscape:"
-            textSize = 12f
-            setPadding(0, dpToPx(10), 0, dpToPx(4))
-            setTextColor(currentTheme.textPrimaryColor)
-        }
-        container.addView(tvCastHeader)
-
-        val rgCastLayout = android.widget.RadioGroup(this).apply {
-            orientation = android.widget.RadioGroup.VERTICAL
-        }
-        val rbCastFit = android.widget.RadioButton(this).apply {
-            text = "Fit Viewport (Uncropped • Above Speedo)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        val rbCastFill = android.widget.RadioButton(this).apply {
-            text = "Fill Safe Viewport (Top-Anchored • Above Speedo)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        val rbCastRot90 = android.widget.RadioButton(this).apply {
-            text = "Auto-Panorama (Full 784px Wide • Above Speedo)"
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        rgCastLayout.addView(rbCastFit)
-        rgCastLayout.addView(rbCastFill)
-        rgCastLayout.addView(rbCastRot90)
-        when (appSettings.tftCastLayoutMode) {
-            AppSettings.CAST_LAYOUT_FILL -> rbCastFill.isChecked = true
-            AppSettings.CAST_LAYOUT_ROT90 -> rbCastRot90.isChecked = true
-            else -> rbCastFit.isChecked = true
-        }
-        container.addView(rgCastLayout)
-
-        val cbAutoOpenMaps = android.widget.CheckBox(this).apply {
-            text = "Auto-open Google Maps when starting Live Cast"
-            isChecked = appSettings.isTftCastAutoOpenMapsEnabled
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-            setPadding(0, dpToPx(8), 0, 0)
-        }
-        container.addView(cbAutoOpenMaps)
-
-        val cbAlignLeft = android.widget.CheckBox(this).apply {
-            text = "Reposition Cast to Left (Split Cockpit • Anti-Tachometer)"
-            isChecked = appSettings.isTftCastAlignLeftEnabled
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-        }
-        container.addView(cbAlignLeft)
-
-        val canWriteRotation = android.provider.Settings.System.canWrite(this)
-        val cbForceLandscape = android.widget.CheckBox(this).apply {
-            text = if (canWriteRotation) {
-                "Auto-lock phone to Landscape during Live Cast"
-            } else {
-                "Auto-lock phone to Landscape during Cast (tap to allow)"
-            }
-            isChecked = appSettings.isTftCastForceLandscapeEnabled
-            setTextColor(currentTheme.textSecondaryColor)
-            textSize = 12f
-            setOnClickListener {
-                if (isChecked && !android.provider.Settings.System.canWrite(this@MainActivity)) {
-                    try {
-                        startActivity(
-                            Intent(
-                                android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS,
-                                Uri.parse("package:$packageName")
-                            )
-                        )
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-        container.addView(cbForceLandscape)
-
-        val scrollWrapper = android.widget.ScrollView(this).apply {
-            addView(container)
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("TFT Wi-Fi & Display Config")
-            .setView(scrollWrapper)
-            .setPositiveButton("Save") { _, _ ->
-                appSettings.tftWifiSsid = etSsid.text.toString().trim()
-                appSettings.tftWifiVin = etVin.text.toString().trim()
-                appSettings.tftWifiPassphrase = etPass.text.toString().trim()
-                appSettings.clusterConsoleType = when {
-                    rbConsoleTft.isChecked -> AppSettings.CLUSTER_CONSOLE_TFT
-                    rbConsoleLcd.isChecked -> AppSettings.CLUSTER_CONSOLE_LCD
-                    else -> AppSettings.CLUSTER_CONSOLE_AUTO
-                }
-                val nextMode = if (rbLiveMap.isChecked) AppSettings.TFT_MODE_LIVE_MAP else AppSettings.TFT_MODE_HUD
-                appSettings.tftMirrorMode = nextMode
-                appSettings.tftCastLayoutMode = when {
-                    rbCastFill.isChecked -> AppSettings.CAST_LAYOUT_FILL
-                    rbCastRot90.isChecked -> AppSettings.CAST_LAYOUT_ROT90
-                    else -> AppSettings.CAST_LAYOUT_FIT
-                }
-                appSettings.isTftCastAutoOpenMapsEnabled = cbAutoOpenMaps.isChecked
-                appSettings.isTftCastAlignLeftEnabled = cbAlignLeft.isChecked
-                appSettings.isTftCastForceLandscapeEnabled = cbForceLandscape.isChecked
-                TftWifiMirrorManager.getInstance(this).switchHeadlessModeIfActive(nextMode)
-                if (!isWifiEnabled()) {
-                    showFeedback("TFT settings saved • Remember to turn on Wi-Fi before casting", isAlert = true)
-                } else {
-                    showFeedback("TFT settings saved")
-                }
-            }
-            .setNeutralButton("Clear Wi-Fi") { _, _ ->
-                appSettings.tftWifiSsid = ""
-                appSettings.tftWifiVin = ""
-                appSettings.tftWifiPassphrase = ""
-                showFeedback("TFT Wi-Fi credentials cleared")
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun startTftRouteFromSharedInput(rawInput: String) {
-        showNavigationHubBottomSheet(initialInput = rawInput, autoStart = true)
-    }
-
-    private fun showDestinationSearchAndRouteDialog() {
-        showNavigationHubBottomSheet()
-    }
-
-    private fun showNavigationHubBottomSheet(initialInput: String? = null, autoStart: Boolean = false) {
-        val mapEngine = TftNavigationMapEngine.getInstance(this)
-        val dialog = BottomSheetDialog(this, R.style.ObsidianBottomSheetDialog)
-        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_navigation_hub, null)
-        dialog.setContentView(sheetView)
-
-        val etInput = sheetView.findViewById<EditText>(R.id.etNavDestination)
-        val ivClear = sheetView.findViewById<ImageView>(R.id.ivNavClearInput)
-        val ivDismiss = sheetView.findViewById<ImageView>(R.id.ivDismissNavHub)
-        val cardPreview = sheetView.findViewById<View>(R.id.cardNavPreview)
-        val pbResolving = sheetView.findViewById<ProgressBar>(R.id.pbNavResolving)
-        val tvPreviewTitle = sheetView.findViewById<TextView>(R.id.tvNavPreviewTitle)
-        val tvPreviewStats = sheetView.findViewById<TextView>(R.id.tvNavPreviewStats)
-        val btnStart = sheetView.findViewById<MaterialButton>(R.id.btnStartTftRoute)
-        val btnMaps = sheetView.findViewById<MaterialButton>(R.id.btnLaunchGoogleMaps)
-        val btnStop = sheetView.findViewById<MaterialButton>(R.id.btnStopTftRoute)
-        val layoutRecentList = sheetView.findViewById<LinearLayout>(R.id.layoutRecentList)
-
-        ivDismiss.setOnClickListener { dialog.dismiss() }
-
-        etInput.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                ivClear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
-            }
-            override fun afterTextChanged(s: Editable?) {}
-        })
-        ivClear.setOnClickListener {
-            etInput.setText("")
-        }
-
-        val currentState = mapEngine.uiState.value
-        val isAlreadyRunning = currentState.routeActive || mapEngine.hasPendingRoute()
-
-        if (isAlreadyRunning) {
-            cardPreview.visibility = View.VISIBLE
-            tvPreviewTitle.text = currentState.destinationLabel.ifBlank { "Active Route" }
-            tvPreviewStats.text = listOfNotNull(
-                currentState.remainingDistanceText.ifBlank { null },
-                currentState.remainingEtaText.ifBlank { null }
-            ).joinToString(" • ").ifBlank { "Active on TFT Cluster" }
-            btnStop.visibility = View.VISIBLE
-        }
-
-        fun performStartRoute(targetInput: String) {
-            val q = targetInput.trim()
-            if (q.isBlank()) {
-                showFeedback("Please enter a destination or address", isAlert = true)
-                return
-            }
-            cardPreview.visibility = View.VISIBLE
-            pbResolving.visibility = View.VISIBLE
-            tvPreviewTitle.text = q
-            tvPreviewStats.text = "Resolving coordinates over mobile data..."
-            btnStart.isEnabled = false
-            btnStop.visibility = View.GONE
-
-            val wifiMgr = TftWifiMirrorManager.getInstance(this@MainActivity)
-            BikeBleForegroundService.startForLocationNavigation(this@MainActivity)
-            if (wifiMgr.mirrorState.value.status == TftMirrorStatus.IDLE) {
-                appSettings.tftMirrorMode = AppSettings.TFT_MODE_LIVE_MAP
-                if (isAccountTabVisible.value || fullscreenTftDialog?.isShowing == true) {
-                    wifiMgr.startLocalDebugPreview()
-                }
-            }
-
-            mapEngine.startRouteFromInput(q) { ok, message ->
-                runOnUiThread {
-                    pbResolving.visibility = View.GONE
-                    btnStart.isEnabled = true
-                    if (ok) {
-                        val state = mapEngine.uiState.value
-                        tvPreviewTitle.text = state.destinationLabel.ifBlank { q }
-                        tvPreviewStats.text = listOfNotNull(
-                            state.remainingDistanceText.ifBlank { null },
-                            state.remainingEtaText.ifBlank { null }
-                        ).joinToString(" • ").ifBlank { "Route ready" }
-                        btnStop.visibility = View.VISIBLE
-                        showFeedback(message)
-                        if (autoStart) {
-                            lifecycleScope.launch {
-                                kotlinx.coroutines.delay(1200)
-                                if (dialog.isShowing) dialog.dismiss()
-                            }
-                        }
-                    } else {
-                        tvPreviewStats.text = message
-                        showFeedback(message, isAlert = true)
-                    }
-                }
-            }
-        }
-
-        fun refreshRecentList() {
-            layoutRecentList.removeAllViews()
-            val recents = TftMapMathAndParser.parseRecentDests(appSettings.navV2RecentDestsJson)
-            if (recents.isEmpty()) {
-                val emptyTv = TextView(this@MainActivity).apply {
-                    text = "No recent trips yet. Search or share from Google Maps."
-                    textSize = 12f
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-                    setPadding(0, dpToPx(4), 0, dpToPx(8))
-                }
-                layoutRecentList.addView(emptyTv)
-            } else {
-                for (dest in recents.take(5)) {
-                    val row = LinearLayout(this@MainActivity).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER_VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            dpToPx(44)
-                        )
-                        isClickable = true
-                        isFocusable = true
-                        setBackgroundResource(R.drawable.rounded_box)
-                        backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.surface_card))
-                        setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
-                        setOnClickListener {
-                            etInput.setText(dest.name)
-                            etInput.setSelection(dest.name.length)
-                            performStartRoute(dest.name)
-                        }
-                    }
-                    val icon = ImageView(this@MainActivity).apply {
-                        layoutParams = LinearLayout.LayoutParams(dpToPx(20), dpToPx(20))
-                        setImageResource(R.drawable.ic_trips)
-                        imageTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.wine_red_light))
-                    }
-                    val label = TextView(this@MainActivity).apply {
-                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                            marginStart = dpToPx(10)
-                        }
-                        text = dest.name
-                        textSize = 13f
-                        maxLines = 1
-                        ellipsize = TextUtils.TruncateAt.END
-                        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-                    }
-                    val arrow = ImageView(this@MainActivity).apply {
-                        layoutParams = LinearLayout.LayoutParams(dpToPx(16), dpToPx(16))
-                        setImageResource(R.drawable.ic_navigation)
-                        imageTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-                        rotation = 45f
-                    }
-                    row.addView(icon)
-                    row.addView(label)
-                    row.addView(arrow)
-                    layoutRecentList.addView(row)
-                    val space = View(this@MainActivity).apply {
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(6))
-                    }
-                    layoutRecentList.addView(space)
-                }
-            }
-        }
-        refreshRecentList()
-
-        // Quick shortcut chips
-        sheetView.findViewById<View>(R.id.chipNavHome).setOnClickListener {
-            val addr = appSettings.homeAddress.ifBlank { "Home" }
-            etInput.setText(addr)
-            etInput.setSelection(etInput.text.length)
-            if (addr != "Home") performStartRoute(addr)
-        }
-        sheetView.findViewById<View>(R.id.chipNavWork).setOnClickListener {
-            val addr = appSettings.workAddress.ifBlank { "Work" }
-            etInput.setText(addr)
-            etInput.setSelection(etInput.text.length)
-            if (addr != "Work") performStartRoute(addr)
-        }
-        sheetView.findViewById<View>(R.id.chipNavPetrol).setOnClickListener {
-            etInput.setText("Petrol Pump")
-            etInput.setSelection(etInput.text.length)
-            performStartRoute("Petrol Pump")
-        }
-        sheetView.findViewById<View>(R.id.chipNavHospital).setOnClickListener {
-            etInput.setText("Hospital")
-            etInput.setSelection(etInput.text.length)
-            performStartRoute("Hospital")
-        }
-        sheetView.findViewById<View>(R.id.chipNavService).setOnClickListener {
-            etInput.setText("Bajaj Service Center")
-            etInput.setSelection(etInput.text.length)
-            performStartRoute("Bajaj Service Center")
-        }
-
-        btnStart.setOnClickListener {
-            performStartRoute(etInput.text.toString())
-        }
-
-        etInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_SEARCH) {
-                performStartRoute(etInput.text.toString())
-                true
-            } else false
-        }
-
-        btnMaps.setOnClickListener {
-            val q = etInput.text.toString().trim()
-            if (q.isNotBlank()) {
-                val gmmIntentUri = Uri.parse("google.navigation:q=" + Uri.encode(q))
-                val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
-                    setPackage("com.google.android.apps.maps")
-                }
-                try {
-                    startActivity(mapIntent)
-                    dialog.dismiss()
-                } catch (_: Exception) {
-                    launchGoogleMapsRide()
-                }
-            } else {
-                launchGoogleMapsRide()
-                dialog.dismiss()
-            }
-        }
-
-        btnStop.setOnClickListener {
-            mapEngine.clearActiveRoute()
-            cardPreview.visibility = View.GONE
-            btnStop.visibility = View.GONE
-            showFeedback("PulsarNav Live Map route cleared")
-        }
-
-        if (!initialInput.isNullOrBlank()) {
-            etInput.setText(initialInput)
-            etInput.setSelection(initialInput.length)
-            if (autoStart) {
-                performStartRoute(initialInput)
-            }
-        }
-
-        dialog.show()
-    }
-
-    private fun showMapsTbtTroubleshooterDialog() {
-        val granted = isNotificationAccessGranted()
-        val diag = GoogleMapsNotificationListener.diagnostics.value
-        val activeRoute = TftNavigationMapEngine.getInstance(this).uiState.value
-
-        val statusLines = buildString {
-            append("• Notification Access: ${if (granted) "GRANTED" else "MISSING"}\n")
-            append("• Listener Service: ${if (diag.isConnected) "CONNECTED" else "DISCONNECTED"}\n")
-            append("• Maps Notif in Shade: ${if (diag.mapsActiveInShade) "DETECTED" else "NOT FOUND"}\n")
-            if (diag.lastNavSummary.isNotBlank()) {
-                append("• Last TBT: ${diag.lastNavSummary}\n")
-            }
-            if (activeRoute.routeActive) {
-                append("• Built-in Live Map Route: ${activeRoute.destinationLabel} (${activeRoute.remainingDistanceText})\n")
-            }
-            append("\nIf Google Maps is in mini PiP window with NO notification in the top shade (common on ColorOS / OxygenOS / RealmeUI):\n")
-            append("1. Tap \"Maps Notifs\" below and turn ON Notifications -> \"Navigation\".\n")
-            append("2. Tap \"Maps Battery\" and set to Unrestricted / Allow background activity.\n")
-            append("3. Or inside Google Maps, tap Share -> PulsarNav to route directly on our 800×480 Live Map (works locked & needs zero Maps notification).")
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Google Maps TBT Diagnostics")
-            .setMessage(statusLines)
-            .setPositiveButton("Maps Notifs") { _, _ ->
-                openAppNotificationSettings("com.google.android.apps.maps")
-            }
-            .setNeutralButton("Maps Battery") { _, _ ->
-                openAppDetailsSettings("com.google.android.apps.maps")
-            }
-            .setNegativeButton("Route in App") { _, _ ->
-                showDestinationSearchAndRouteDialog()
-            }
-            .show()
-    }
-
-    private fun openAppNotificationSettings(targetPackage: String) {
-        try {
-            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                putExtra(Settings.EXTRA_APP_PACKAGE, targetPackage)
-            }
-            startActivity(intent)
-        } catch (_: Exception) {
-            openAppDetailsSettings(targetPackage)
-        }
-    }
-
-    private fun openAppDetailsSettings(targetPackage: String) {
-        try {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.parse("package:$targetPackage")
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            showFeedback("Unable to open settings: ${e.message}", isAlert = true)
-        }
-    }
+    private fun showMapsTbtTroubleshooterDialog() = navigationHubController.showMapsTbtTroubleshooterDialog()
 
     private fun updateDeviceList(bikes: List<DiscoveredBike>) {
-        binding.layoutDeviceList.removeAllViews()
-        for (bike in bikes) {
-            val itemView = LayoutInflater.from(this).inflate(R.layout.item_device, binding.layoutDeviceList, false)
-            itemView.findViewById<TextView>(R.id.tvDeviceName).text = bike.name
-            itemView.findViewById<TextView>(R.id.tvDeviceAddress).text = "${bike.address}  •  ${bike.rssi} dBm"
-            itemView.findViewById<MaterialButton>(R.id.btnConnectDevice).setOnClickListener {
-                bleManager.connect(bike.device)
-            }
-            binding.layoutDeviceList.addView(itemView)
-        }
+        discoveredBikeAdapter.submitList(bikes.toList())
     }
+
 
     private fun observeNavigation() {
         lifecycleScope.launch {
@@ -6684,38 +4298,38 @@ class MainActivity : AppCompatActivity() {
                             }
                             updateNavDisplay(step.maneuver, dist, street, etaStr)
                         } else if (!bleManager.isSimulationRunning.value) {
-                            binding.tvDistance.text = "-- m"
-                            binding.tvStreetName.text = if (!isNotificationAccessGranted()) {
+                            binding.tabAccount.tvDistance.text = "-- m"
+                            binding.tabAccount.tvStreetName.text = if (!isNotificationAccessGranted()) {
                                 "Enable Notification Access or tap Search"
                             } else if (!diag.mapsActiveInShade) {
-                                "Waiting for Maps Notif (tap Maps Fix ›)"
+                                "Waiting for Maps Notif (tap Maps Fix)"
                             } else {
                                 "Waiting for Google Maps..."
                             }
-                            binding.tvManeuverIcon.text = "⬆"
-                            binding.tvEtaBadge.text = "-- min ETA"
+                            binding.tabAccount.tvManeuverIcon.text = "⬆"
+                            binding.tabAccount.tvEtaBadge.text = "-- min ETA"
                         }
                         updateNotificationAccessUi()
 
                         // Update Active TFT Live Navigation Dashboard Card
                         val isTftNavRunning = mapUi.routeActive || mapUi.isLoadingRoute || mapUi.isRerouting
                         if (isTftNavRunning) {
-                            binding.cardActiveTftNavigation.visibility = View.VISIBLE
+                            binding.tabCockpit.cardActiveTftNavigation.visibility = View.VISIBLE
                             when {
                                 mapUi.isRerouting -> {
-                                    binding.tvActiveNavNextTurn.text = "Rerouting..."
-                                    binding.tvActiveNavTripSummary.text = "Recalculating route to ${mapUi.destinationLabel}..."
-                                    binding.tvActiveNavStatusBadge.text = "REROUTING"
-                                    binding.btnActiveNavReroute.isEnabled = false
+                                    binding.tabCockpit.tvActiveNavNextTurn.text = "Rerouting..."
+                                    binding.tabCockpit.tvActiveNavTripSummary.text = "Recalculating route to ${mapUi.destinationLabel}..."
+                                    binding.tabCockpit.tvActiveNavStatusBadge.text = "REROUTING"
+                                    binding.tabCockpit.btnActiveNavReroute.isEnabled = false
                                 }
                                 mapUi.isLoadingRoute -> {
-                                    binding.tvActiveNavNextTurn.text = "Calculating Route"
-                                    binding.tvActiveNavTripSummary.text = "Looking up ${mapUi.destinationLabel}..."
-                                    binding.tvActiveNavStatusBadge.text = "CALCULATING"
-                                    binding.btnActiveNavReroute.isEnabled = false
+                                    binding.tabCockpit.tvActiveNavNextTurn.text = "Calculating Route"
+                                    binding.tabCockpit.tvActiveNavTripSummary.text = "Looking up ${mapUi.destinationLabel}..."
+                                    binding.tabCockpit.tvActiveNavStatusBadge.text = "CALCULATING"
+                                    binding.tabCockpit.btnActiveNavReroute.isEnabled = false
                                 }
                                 else -> {
-                                    binding.btnActiveNavReroute.isEnabled = true
+                                    binding.tabCockpit.btnActiveNavReroute.isEnabled = true
                                     val turnTitle = if (step != null) {
                                         val dist = step.rawDistanceText.ifBlank { "${step.distanceMeters} m" }
                                         val street = step.streetName.ifBlank { step.maneuver.description }
@@ -6723,17 +4337,17 @@ class MainActivity : AppCompatActivity() {
                                     } else {
                                         mapUi.destinationLabel.ifBlank { "TFT Live Navigation" }
                                     }
-                                    binding.tvActiveNavNextTurn.text = turnTitle
+                                    binding.tabCockpit.tvActiveNavNextTurn.text = turnTitle
                                     val stats = listOfNotNull(
                                         mapUi.remainingDistanceText.ifBlank { null },
                                         mapUi.remainingEtaText.ifBlank { null }
                                     ).joinToString(" • ")
-                                    binding.tvActiveNavTripSummary.text = stats.ifBlank { "Active on TFT Cluster" }
-                                    binding.tvActiveNavStatusBadge.text = "TFT LIVE"
+                                    binding.tabCockpit.tvActiveNavTripSummary.text = stats.ifBlank { "Active on TFT Cluster" }
+                                    binding.tabCockpit.tvActiveNavStatusBadge.text = "TFT LIVE"
                                 }
                             }
                         } else {
-                            binding.cardActiveTftNavigation.visibility = View.GONE
+                            binding.tabCockpit.cardActiveTftNavigation.visibility = View.GONE
                         }
                     }
                 }
@@ -6750,10 +4364,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateNavDisplay(m: Maneuver, distText: String, street: String, etaText: String) {
-        binding.tvDistance.text = distText
-        binding.tvStreetName.text = street
-        binding.tvManeuverIcon.text = getArrowForManeuver(m)
-        binding.tvEtaBadge.text = etaText
+        binding.tabAccount.tvDistance.text = distText
+        binding.tabAccount.tvStreetName.text = street
+        binding.tabAccount.tvManeuverIcon.text = getArrowForManeuver(m)
+        binding.tabAccount.tvEtaBadge.text = etaText
     }
 
     private fun updateSimulationUiState(running: Boolean, maneuver: Maneuver?) {
@@ -6766,47 +4380,47 @@ class MainActivity : AppCompatActivity() {
         val activeText = theme.onPrimaryColor
 
         if (running && maneuver == Maneuver.TURN_LEFT) {
-            binding.btnTestLeft.backgroundTintList = activeTint
-            binding.btnTestLeft.setTextColor(activeText)
+            binding.tabAccount.btnTestLeft.backgroundTintList = activeTint
+            binding.tabAccount.btnTestLeft.setTextColor(activeText)
         } else {
-            binding.btnTestLeft.backgroundTintList = defaultSubtle
-            binding.btnTestLeft.strokeColor = defaultBorder
-            binding.btnTestLeft.setTextColor(defaultText)
+            binding.tabAccount.btnTestLeft.backgroundTintList = defaultSubtle
+            binding.tabAccount.btnTestLeft.strokeColor = defaultBorder
+            binding.tabAccount.btnTestLeft.setTextColor(defaultText)
         }
 
         if (running && maneuver == Maneuver.STRAIGHT) {
-            binding.btnTestStraight.backgroundTintList = activeTint
-            binding.btnTestStraight.setTextColor(activeText)
+            binding.tabAccount.btnTestStraight.backgroundTintList = activeTint
+            binding.tabAccount.btnTestStraight.setTextColor(activeText)
         } else {
-            binding.btnTestStraight.backgroundTintList = defaultSubtle
-            binding.btnTestStraight.strokeColor = defaultBorder
-            binding.btnTestStraight.setTextColor(defaultText)
+            binding.tabAccount.btnTestStraight.backgroundTintList = defaultSubtle
+            binding.tabAccount.btnTestStraight.strokeColor = defaultBorder
+            binding.tabAccount.btnTestStraight.setTextColor(defaultText)
         }
 
         if (running && maneuver == Maneuver.TURN_RIGHT) {
-            binding.btnTestRight.backgroundTintList = activeTint
-            binding.btnTestRight.setTextColor(activeText)
+            binding.tabAccount.btnTestRight.backgroundTintList = activeTint
+            binding.tabAccount.btnTestRight.setTextColor(activeText)
         } else {
-            binding.btnTestRight.backgroundTintList = defaultSubtle
-            binding.btnTestRight.strokeColor = defaultBorder
-            binding.btnTestRight.setTextColor(defaultText)
+            binding.tabAccount.btnTestRight.backgroundTintList = defaultSubtle
+            binding.tabAccount.btnTestRight.strokeColor = defaultBorder
+            binding.tabAccount.btnTestRight.setTextColor(defaultText)
         }
 
         if (running && (maneuver == Maneuver.ROUNDABOUT_LEFT || maneuver == Maneuver.ROUNDABOUT_RIGHT)) {
-            binding.btnTestRoundabout.backgroundTintList = activeTint
-            binding.btnTestRoundabout.setTextColor(activeText)
+            binding.tabAccount.btnTestRoundabout.backgroundTintList = activeTint
+            binding.tabAccount.btnTestRoundabout.setTextColor(activeText)
         } else {
-            binding.btnTestRoundabout.backgroundTintList = defaultSubtle
-            binding.btnTestRoundabout.strokeColor = defaultBorder
-            binding.btnTestRoundabout.setTextColor(defaultText)
+            binding.tabAccount.btnTestRoundabout.backgroundTintList = defaultSubtle
+            binding.tabAccount.btnTestRoundabout.strokeColor = defaultBorder
+            binding.tabAccount.btnTestRoundabout.setTextColor(defaultText)
         }
 
         if (running) {
-            binding.btnStopSimulation.strokeColor = ColorStateList.valueOf(theme.accentColor)
-            binding.btnStopSimulation.setTextColor(theme.accentColor)
+            binding.tabAccount.btnStopSimulation.strokeColor = ColorStateList.valueOf(theme.accentColor)
+            binding.tabAccount.btnStopSimulation.setTextColor(theme.accentColor)
         } else {
-            binding.btnStopSimulation.strokeColor = defaultBorder
-            binding.btnStopSimulation.setTextColor(theme.textSecondaryColor)
+            binding.tabAccount.btnStopSimulation.strokeColor = defaultBorder
+            binding.tabAccount.btnStopSimulation.setTextColor(theme.textSecondaryColor)
         }
     }
 
@@ -6817,38 +4431,38 @@ class MainActivity : AppCompatActivity() {
                     callManager.callInfo.collectLatest { call ->
                         when (call.state) {
                             CallState.INCOMING_CALL -> {
-                                binding.tvCallerStatus.text = "Incoming Call: ${call.callerName ?: "Unknown"} (${call.callerNumber.orEmpty()})"
-                                binding.tvCallerStatus.setTextColor(currentTheme.accentColor)
-                                binding.btnSimulateCall.text = "End Call"
+                                binding.tabAccount.tvCallerStatus.text = "Incoming Call: ${call.callerName ?: "Unknown"} (${call.callerNumber.orEmpty()})"
+                                binding.tabAccount.tvCallerStatus.setTextColor(currentTheme.accentColor)
+                                binding.tabAccount.btnSimulateCall.text = "End Call"
                             }
                             CallState.ACTIVE_CALL -> {
-                                binding.tvCallerStatus.text = "Active Call: ${call.callerName ?: "In Call"}"
-                                binding.tvCallerStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
-                                binding.btnSimulateCall.text = "End Call"
+                                binding.tabAccount.tvCallerStatus.text = "Active Call: ${call.callerName ?: "In Call"}"
+                                binding.tabAccount.tvCallerStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+                                binding.tabAccount.btnSimulateCall.text = "End Call"
                             }
                             CallState.OUTGOING_CALL -> {
-                                binding.tvCallerStatus.text = "Outgoing Call: ${call.callerName ?: "Dialing..."}"
-                                binding.tvCallerStatus.setTextColor(currentTheme.accentColor)
-                                binding.btnSimulateCall.text = "End Call"
+                                binding.tabAccount.tvCallerStatus.text = "Outgoing Call: ${call.callerName ?: "Dialing..."}"
+                                binding.tabAccount.tvCallerStatus.setTextColor(currentTheme.accentColor)
+                                binding.tabAccount.btnSimulateCall.text = "End Call"
                             }
                             else -> {
-                                binding.tvCallerStatus.text = "Phone Idle • No incoming call"
-                                binding.tvCallerStatus.setTextColor(currentTheme.textPrimaryColor)
-                                binding.btnSimulateCall.text = "Call"
+                                binding.tabAccount.tvCallerStatus.text = "Phone Idle • No incoming call"
+                                binding.tabAccount.tvCallerStatus.setTextColor(currentTheme.textPrimaryColor)
+                                binding.tabAccount.btnSimulateCall.text = "Call"
                             }
                         }
-                        binding.tvMissedCallBadge.text = "${call.missedCallCount} Missed"
+                        binding.tabAccount.tvMissedCallBadge.text = "${call.missedCallCount} Missed"
                     }
                 }
 
                 launch {
                     mediaControlManager.lastMediaEvent.collectLatest { event ->
                         if (event != null) {
-                            binding.tvMediaBanner.text = "Media Control: $event"
-                            binding.tvMediaBanner.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+                            binding.tabAccount.tvMediaBanner.text = "Media Control: $event"
+                            binding.tabAccount.tvMediaBanner.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
                         } else {
-                            binding.tvMediaBanner.text = "Handlebar Button: Click = Play/Pause • Hold = Next • Click+Hold = Prev"
-                            binding.tvMediaBanner.setTextColor(currentTheme.accentColor)
+                            binding.tabAccount.tvMediaBanner.text = "Handlebar Button: Click = Play/Pause • Hold = Next • Click+Hold = Prev"
+                            binding.tabAccount.tvMediaBanner.setTextColor(currentTheme.accentColor)
                         }
                     }
                 }
@@ -6861,11 +4475,11 @@ class MainActivity : AppCompatActivity() {
                             } else {
                                 "WhatsApp Alert"
                             }
-                            binding.tvWhatsAppAlertBanner.text = "$label: ${alert.sender} (Showing on cluster)"
-                            binding.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
+                            binding.tabAccount.tvWhatsAppAlertBanner.text = "$label: ${alert.sender} (Showing on cluster)"
+                            binding.tabAccount.tvWhatsAppAlertBanner.setTextColor(currentTheme.accentColor)
                         } else {
-                            binding.tvWhatsAppAlertBanner.text = "Messaging Alerts: Listening (WhatsApp & SMS)"
-                            binding.tvWhatsAppAlertBanner.setTextColor(currentTheme.textSecondaryColor)
+                            binding.tabAccount.tvWhatsAppAlertBanner.text = "Messaging Alerts: Listening (WhatsApp & SMS)"
+                            binding.tabAccount.tvWhatsAppAlertBanner.setTextColor(currentTheme.textSecondaryColor)
                         }
                     }
                 }
@@ -6873,11 +4487,11 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     bleManager.lastClusterAction.collectLatest { action ->
                         if (action != null) {
-                            binding.tvClusterActionStatus.text = "Cluster Action: $action"
-                            binding.tvClusterActionStatus.setTextColor(currentTheme.accentColor)
+                            binding.tabAccount.tvClusterActionStatus.text = "Cluster Action: $action"
+                            binding.tabAccount.tvClusterActionStatus.setTextColor(currentTheme.accentColor)
                         } else {
-                            binding.tvClusterActionStatus.text = "Cluster Action: Waiting for switchgear / phonebook sync"
-                            binding.tvClusterActionStatus.setTextColor(currentTheme.textSecondaryColor)
+                            binding.tabAccount.tvClusterActionStatus.text = "Cluster Action: Waiting for switchgear / phonebook sync"
+                            binding.tabAccount.tvClusterActionStatus.setTextColor(currentTheme.textSecondaryColor)
                         }
                     }
                 }
@@ -6985,13 +4599,13 @@ class MainActivity : AppCompatActivity() {
         val issues = appSettings.getBikeIssues()
         val openCount = issues.count { !it.isResolved }
         if (openCount > 0) {
-            binding.tvIssuesCountBadge.text = "$openCount Open"
-            binding.tvIssuesCountBadge.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-            binding.tvIssuesCountBadge.setTextColor(currentTheme.accentColor)
+            binding.tabSupport.tvIssuesCountBadge.text = "$openCount Open"
+            binding.tabSupport.tvIssuesCountBadge.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+            binding.tabSupport.tvIssuesCountBadge.setTextColor(currentTheme.accentColor)
         } else {
-            binding.tvIssuesCountBadge.text = "0 Pending"
-            binding.tvIssuesCountBadge.backgroundTintList = ColorStateList.valueOf(if (currentTheme.isLight) Color.parseColor("#EAECEF") else Color.parseColor("#2A2832"))
-            binding.tvIssuesCountBadge.setTextColor(ContextCompat.getColor(this, R.color.status_connected))
+            binding.tabSupport.tvIssuesCountBadge.text = "0 Pending"
+            binding.tabSupport.tvIssuesCountBadge.backgroundTintList = ColorStateList.valueOf(if (currentTheme.isLight) Color.parseColor("#EAECEF") else Color.parseColor("#2A2832"))
+            binding.tabSupport.tvIssuesCountBadge.setTextColor(ContextCompat.getColor(this, R.color.status_connected))
         }
     }
 
@@ -7150,39 +4764,39 @@ class MainActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 maintenanceManager.status.collectLatest { s ->
                     updateHeroRangeDisplay()
-                    binding.tvChainRemaining.text = String.format(Locale.US, "%.0f km left", s.chainLubeRemainingKm)
-                    binding.progressChain.progress = s.chainLubePercent
-                    binding.tvSupportChainRemaining.text = String.format(Locale.US, "Chain Lube: %.0f km left", s.chainLubeRemainingKm.coerceAtLeast(0.0))
+                    binding.tabSupport.tvChainRemaining.text = String.format(Locale.US, "%.0f km left", s.chainLubeRemainingKm)
+                    binding.tabSupport.progressChain.progress = s.chainLubePercent
+                    binding.tabSupport.tvSupportChainRemaining.text = String.format(Locale.US, "Chain Lube: %.0f km left", s.chainLubeRemainingKm.coerceAtLeast(0.0))
 
                     if (s.isServiceOverdue) {
-                        binding.tvSupportServiceRemaining.text = "OVERDUE"
-                        binding.tvSupportServiceRemainingUnit.visibility = View.GONE
-                        binding.tvSupportServiceRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
-                        binding.tvServiceHistorySummary.text = "Service Overdue • Immediate maintenance required"
-                        binding.progressSupportService.progress = 100
-                        binding.tvSupportHealthNote.text = "Schedule periodic service to maintain engine longevity"
-                        binding.tvServiceRemaining.text = String.format(Locale.US, "OVERDUE by %.0f km", s.serviceOverdueKm)
-                        binding.tvServiceRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
-                        binding.progressService.progress = 100
+                        binding.tabSupport.tvSupportServiceRemaining.text = "OVERDUE"
+                        binding.tabSupport.tvSupportServiceRemainingUnit.visibility = View.GONE
+                        binding.tabSupport.tvSupportServiceRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
+                        binding.tabSupport.tvServiceHistorySummary.text = "Service Overdue • Immediate maintenance required"
+                        binding.tabSupport.progressSupportService.progress = 100
+                        binding.tabSupport.tvSupportHealthNote.text = "Schedule periodic service to maintain engine longevity"
+                        binding.tabSupport.tvServiceRemaining.text = String.format(Locale.US, "OVERDUE by %.0f km", s.serviceOverdueKm)
+                        binding.tabSupport.tvServiceRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
+                        binding.tabSupport.progressService.progress = 100
                     } else {
-                        binding.tvSupportServiceRemaining.text = String.format(Locale.US, "%.0f", s.serviceRemainingKm.coerceAtLeast(0.0))
-                        binding.tvSupportServiceRemainingUnit.visibility = View.VISIBLE
-                        binding.tvSupportServiceRemaining.setTextColor(currentTheme.accentColor)
+                        binding.tabSupport.tvSupportServiceRemaining.text = String.format(Locale.US, "%.0f", s.serviceRemainingKm.coerceAtLeast(0.0))
+                        binding.tabSupport.tvSupportServiceRemainingUnit.visibility = View.VISIBLE
+                        binding.tabSupport.tvSupportServiceRemaining.setTextColor(currentTheme.accentColor)
                         val serviceInterval = MaintenanceManager.SERVICE_INTERVAL_KM
                         val serviceElapsed = (serviceInterval - s.serviceRemainingKm.coerceIn(0.0, serviceInterval))
                         val serviceProgress = ((serviceElapsed / serviceInterval) * 100).toInt().coerceIn(0, 100)
-                        binding.progressSupportService.progress = serviceProgress
-                        binding.tvServiceHistorySummary.text = "Periodic Service • $serviceProgress% of cycle elapsed"
-                        binding.tvSupportHealthNote.text = String.format(Locale.US, "Next routine service due in %.0f km", s.serviceRemainingKm.coerceAtLeast(0.0))
-                        binding.tvServiceRemaining.text = String.format(Locale.US, "%.0f km left (Target: %.0f km)", s.serviceRemainingKm, s.nextServiceTargetOdoKm)
-                        binding.tvServiceRemaining.setTextColor(if (s.isServiceDue) ContextCompat.getColor(this@MainActivity, R.color.amber_accent) else currentTheme.accentColor)
-                        binding.progressService.progress = s.servicePercent
+                        binding.tabSupport.progressSupportService.progress = serviceProgress
+                        binding.tabSupport.tvServiceHistorySummary.text = "Periodic Service • $serviceProgress% of cycle elapsed"
+                        binding.tabSupport.tvSupportHealthNote.text = String.format(Locale.US, "Next routine service due in %.0f km", s.serviceRemainingKm.coerceAtLeast(0.0))
+                        binding.tabSupport.tvServiceRemaining.text = String.format(Locale.US, "%.0f km left (Target: %.0f km)", s.serviceRemainingKm, s.nextServiceTargetOdoKm)
+                        binding.tabSupport.tvServiceRemaining.setTextColor(if (s.isServiceDue) ContextCompat.getColor(this@MainActivity, R.color.amber_accent) else currentTheme.accentColor)
+                        binding.tabSupport.progressService.progress = s.servicePercent
                     }
 
                     if (s.isChainLubeDue) {
-                        binding.tvChainRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
+                        binding.tabSupport.tvChainRemaining.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_scanning))
                     } else {
-                        binding.tvChainRemaining.setTextColor(currentTheme.accentColor)
+                        binding.tabSupport.tvChainRemaining.setTextColor(currentTheme.accentColor)
                     }
                 }
             }
@@ -7198,22 +4812,22 @@ class MainActivity : AppCompatActivity() {
                         updateHeroRangeDisplay()
                         updateBikeInvestmentDisplay()
                         if (stats.averageKmpl > 0.0) {
-                            binding.tvAvgMileage.text = formatDecimal(stats.averageKmpl)
-                            binding.tvAvgMileageUnit.visibility = View.VISIBLE
+                            binding.tabFuel.tvAvgMileage.text = formatDecimal(stats.averageKmpl)
+                            binding.tabFuel.tvAvgMileageUnit.visibility = View.VISIBLE
                         } else {
-                            binding.tvAvgMileage.text = "--"
-                            binding.tvAvgMileageUnit.visibility = View.VISIBLE
+                            binding.tabFuel.tvAvgMileage.text = "--"
+                            binding.tabFuel.tvAvgMileageUnit.visibility = View.VISIBLE
                         }
                         if (stats.costPerKm > 0.0) {
-                            binding.tvCostPerKm.text = String.format(Locale.US, "Cost: %s%.2f / km", appSettings.currentCurrencySymbol, stats.costPerKm)
+                            binding.tabFuel.tvCostPerKm.text = String.format(Locale.US, "Cost: %s%.2f / km", appSettings.currentCurrencySymbol, stats.costPerKm)
                         } else {
-                            binding.tvCostPerKm.text = "Cost: -- / km"
+                            binding.tabFuel.tvCostPerKm.text = "Cost: -- / km"
                         }
                     }
                 }
                 launch {
                     fuelLogManager.entries.collectLatest { entries ->
-                        if (binding.scrollFuel.visibility == View.VISIBLE) {
+                        if (binding.tabFuel.root.visibility == View.VISIBLE) {
                             fuelListThemeDirty = false
                             updateFuelList(entries)
                         } else {
@@ -7225,47 +4839,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("SetTextI18n")
     private fun updateFuelList(entries: List<com.pulsarnav.app.maintenance.FuelEntry>) {
-        binding.layoutFuelList.removeAllViews()
-        if (entries.isEmpty()) {
-            val emptyView = TextView(this).apply {
-                text = "No refuel records yet. Tap 'Log Refueling' above to track fuel & economy."
-                setTextColor(currentTheme.textTertiaryColor)
-                textSize = 13f
-                setPadding(10, 20, 10, 20)
-            }
-            binding.layoutFuelList.addView(emptyView)
-            return
-        }
-        for (entry in entries) {
-            val view = LayoutInflater.from(this).inflate(R.layout.item_fuel, binding.layoutFuelList, false)
-            (view as? com.google.android.material.card.MaterialCardView)?.let { card ->
-                card.setCardBackgroundColor(currentTheme.cardColor)
-                card.strokeColor = currentTheme.cardBorderColor
-                card.isClickable = true
-                card.isFocusable = true
-                card.setOnClickListener {
-                    provideHapticFeedback()
-                    showEditFuelEntryDialog(entry)
-                }
-            }
-            view.findViewById<TextView>(R.id.tvFuelDate).text = entry.formattedDate
-            view.findViewById<TextView>(R.id.tvFuelOdo).text = "Odo: ${formatDecimal(entry.odometerKm)} km • ${formatDecimal(entry.liters)} L"
-            val tvCost = view.findViewById<TextView>(R.id.tvFuelCost)
-            tvCost.text = String.format(Locale.US, "%s%.0f", appSettings.currentCurrencySymbol, entry.totalCostInr)
-            tvCost.setTextColor(currentTheme.accentColor)
-            val mileageView = view.findViewById<TextView>(R.id.tvFuelMileage)
-            val kmpl = entry.calculatedKmpl
-            if (kmpl != null) {
-                mileageView.text = "${formatDecimal(kmpl)} km/l"
-                mileageView.visibility = View.VISIBLE
-            } else {
-                mileageView.visibility = View.GONE
-            }
-            binding.layoutFuelList.addView(view)
-        }
+        fuelListAdapter.submitList(entries.toList())
+        val isEmpty = entries.isEmpty()
+        binding.tabFuel.tvFuelEmptyState.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        binding.tabFuel.rvFuelList.visibility = if (isEmpty) View.GONE else View.VISIBLE
     }
+
 
     private fun showEditFuelEntryDialog(entry: com.pulsarnav.app.maintenance.FuelEntry) {
         val layout = LinearLayout(this).apply {
@@ -7448,12 +5028,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateEmergencyHomeCard() {
         val blood = if (appSettings.riderBloodGroup.isNotBlank() && appSettings.riderBloodGroup != "Not Specified") "${appSettings.riderBloodGroup}" else "Blood Group --"
-        binding.tvBloodGroupBadge.text = blood
+        binding.tabCockpit.tvBloodGroupBadge.text = blood
         val icePhone = appSettings.emergencyContactPhone
-        binding.tvEmergencyContactName.text = if (icePhone.isNotBlank()) "ICE: $icePhone" else "ICE: Not Configured"
+        binding.tabCockpit.tvEmergencyContactName.text = if (icePhone.isNotBlank()) "ICE: $icePhone" else "ICE: Not Configured"
         val iceName = appSettings.emergencyContactName
         val med = appSettings.medicalNotes
-        binding.tvEmergencyMedicalNotes.text = when {
+        binding.tabCockpit.tvEmergencyMedicalNotes.text = when {
             iceName.isNotBlank() && med.isNotBlank() -> "$iceName • $med"
             iceName.isNotBlank() -> iceName
             med.isNotBlank() -> med

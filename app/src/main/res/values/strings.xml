@@ -11,4 +11,103 @@
     <string name="shortcut_find_long">Walking Directions to Bike</string>
     <string name="shortcut_refuel_short">Add Fuel</string>
     <string name="shortcut_refuel_long">Quick Refuel Log</string>
+
+    <!-- Top Bar & Common Actions -->
+    <string name="status_offline">OFFLINE</string>
+    <string name="warning_bt_off">BT OFF</string>
+    <string name="warning_gps_off">GPS OFF</string>
+    <string name="warning_perms">PERMS</string>
+    <string name="action_sos">SOS</string>
+    <string name="action_recalibrate">Recalibrate</string>
+    <string name="action_scan">Scan</string>
+    <string name="action_config">Config</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_done">Done</string>
+    <string name="action_set">Set</string>
+    <string name="action_grant">Grant</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_manage">Manage</string>
+    <string name="action_maps_fix">Maps Fix</string>
+    <string name="placeholder_dash">--</string>
+
+    <!-- Cockpit / Home Tab -->
+    <string name="section_cockpit_metrics">COCKPIT METRICS</string>
+    <string name="label_est_range">EST. RANGE</string>
+    <string name="label_total_odometer">TOTAL ODOMETER</string>
+    <string name="unit_km">km</string>
+    <string name="unit_kmpl">km/l</string>
+    <string name="subtext_tap_to_sync">Tap to sync</string>
+    <string name="subtext_avg_mileage_empty">-- km/l avg</string>
+    <string name="subtext_not_synced">Not synced yet</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_auto_reconnect">Auto-reconnects when ignition turns ON</string>
+    <string name="title_tft_wifi_mirror">TFT Wi-Fi Mirror</string>
+    <string name="status_idle">Idle</string>
+    <string name="btn_hud_mirror">HUD Mirror\n(Screen Off)</string>
+    <string name="btn_cast_maps">Cast Maps\n(Google Maps)</string>
+    <string name="title_nav_interceptor_setup">Turn-by-Turn Interceptor Setup</string>
+    <string name="desc_nav_interceptor_setup">PulsarNav needs Notification Access to mirror Google Maps, Waze, and Android Auto turns to your cluster.</string>
+    <string name="btn_enable_notification_access">Enable Notification Access</string>
+    <string name="search_destinations_hint">Find places, routes, fuel stations</string>
+    <string name="section_emergency_medical">EMERGENCY &amp; MEDICAL</string>
+    <string name="btn_nearest_hospitals">Nearest Hospitals</string>
+    <string name="btn_emergency_sos_numbers">108 / 112 SOS</string>
+
+    <!-- Fuel Tab -->
+    <string name="section_fuel_expenses">FUEL &amp; EXPENSES</string>
+    <string name="action_refuel_short">+ Refuel</string>
+    <string name="label_avg_mileage">AVG MILEAGE</string>
+    <string name="label_total_investment">TOTAL INVESTMENT</string>
+    <string name="label_cost_per_km_empty">Cost: -- / km</string>
+    <string name="title_refuel_card">Refuel</string>
+    <string name="btn_log_refuel">Log Refuel</string>
+    <string name="action_edit_price">Edit Price</string>
+    <string name="title_nearby_pumps">Nearby Petrol Pumps</string>
+    <string name="subtext_nearby_pumps_default">Search fuel stations in Maps</string>
+    <string name="btn_find_fuel_stations">Find Fuel Stations</string>
+    <string name="section_refueling_history">REFUELING HISTORY</string>
+    <string name="empty_fuel_logs">No refuel records yet. Tap Log Refuel above to track fuel and economy.</string>
+
+    <!-- Support Tab -->
+    <string name="section_maintenance">MAINTENANCE</string>
+    <string name="action_records">Records</string>
+    <string name="label_service_investment">SERVICE INVESTMENT</string>
+    <string name="label_next_service_due">NEXT SERVICE DUE</string>
+    <string name="title_chain_lube">Chain Clean &amp; Lube</string>
+    <string name="btn_mark_chain_lubed">Mark Chain Cleaned &amp; Lubed</string>
+    <string name="title_periodic_service">Periodic Service &amp; Oil</string>
+    <string name="btn_service_done">Service Done</string>
+    <string name="btn_target_odo">Target ODO</string>
+    <string name="title_bike_issues">Bike Issues &amp; Repair Checklist</string>
+    <string name="action_open_checklist">Open Checklist</string>
+    <string name="title_rsa">Roadside assistance</string>
+    <string name="subtext_rsa">24×7 on-road breakdown support</string>
+    <string name="title_manual_specs">Vehicle manual &amp; quick specs</string>
+    <string name="subtext_manual_specs">Tire pressures, oil specs &amp; fluids</string>
+    <string name="btn_report_issue">Report an issue</string>
+
+    <!-- Account Tab -->
+    <string name="section_ownership_docs">OWNERSHIP &amp; DOCUMENTS</string>
+    <string name="section_data_vault">DATA VAULT &amp; PHONE MIGRATION</string>
+    <string name="section_display_appearance">DISPLAY APPEARANCE</string>
+    <string name="btn_dark_mode">Dark Mode</string>
+    <string name="btn_light_mode">Light Mode</string>
+    <string name="section_cockpit_themes">COCKPIT ACCENT THEMES</string>
+    <string name="section_default_nav_app">DEFAULT NAVIGATION APP</string>
+    <string name="section_feature_toggles">FEATURE TOGGLES</string>
+    <string name="section_quick_nav_destinations">QUICK-NAV DESTINATIONS</string>
+    <string name="section_pulsarnav_labs">PULSARNAV LABS (TEST BENCHES)</string>
+    <string name="section_about">ABOUT</string>
+
+    <!-- Labs & Bottom Sheets -->
+    <string name="labs_tft_title">800×480 TFT DEBUGGER</string>
+    <string name="labs_tft_subtext">800×480 virtual TFT · Tap screen to send cluster touch</string>
+    <string name="labs_tft_empty_subtext">Start Preview to test HUD offline</string>
+    <string name="labs_tft_metrics_idle">0 / 30 KB · Q50</string>
+    <string name="labs_logs_title">PROTOCOL &amp; SYSTEM LOGS</string>
+    <string name="labs_logs_empty">No logs yet</string>
+    <string name="vault_section_qr">QR CODE PHONE MIGRATION</string>
+    <string name="vault_section_backup">FULL BACKUP (.PNAV)</string>
+    <string name="vault_backup_desc">Export a vault backup bundle to send via Quick Share, Drive, or Files.</string>
 </resources>
