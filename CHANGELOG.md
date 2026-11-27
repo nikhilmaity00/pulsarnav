@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.19] - 2026-11-27
+
+### Added
+- **Segmented LCD / Color TFT / Auto-Detect Setup Selector**:
+  - Added Instrument Cluster Display selector in first-launch **Vehicle & Regional Setup** and **Account → My Bike → Setup**, hiding TFT-only Wi-Fi Live Map, Phonebook Sync, and 800×480 debugger UI when **Segmented LCD** is chosen.
+- **Non-Blocking GPS OFF Indication**:
+  - Restored top-bar `GPS OFF` readiness indicator across all Android versions (including Android 12+) and added non-blocking GPS reminders when launching navigation without blocking map launch.
+- **Fuel Log Date Picker & Sorting**:
+  - Added date selection (`DatePickerDialog`) when adding or editing fuel refills, preserving chronological chained km/L calculations, plus history sorting (`Date ↓`, `Date ↑`, `Odo ↓`, `Cost ↓`, `km/l ↓`).
+- **Editable Repair Checklist**:
+  - Added in-place **Edit** action on items in the **Bike Issues & Repair Checklist** dialog.
+
+### Fixed
+- **UI Optimization & Modularization**:
+  - Applied Unslop UI polish, `RecyclerView` adapters for fuel/bike lists, split tab layouts, and modular UI controllers.
+- **Google Maps Roundabout TBT (LCD & TFT)**:
+  - Fixed `BajajBleManager.updateNavigationStep` change detection for `roundaboutExit`, ordinal exit / `"traffic circle"` / split-field roundabout notification parsing, and exit nibble logging in `DebugLogRepository`.
+- **Automated Master APK Releases**:
+  - Configured `.github/workflows/release.yml` to automatically build and publish release APKs on every push/merge to `master`.
+
+---
+
 ## [1.3.18] - 2026-11-15
 
 ### Added
