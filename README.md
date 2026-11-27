@@ -1,8 +1,8 @@
 # PulsarNav
 
-Turn-by-turn navigation bridge and companion app for Bajaj Pulsar and Dominar motorcycles.
+Turn-by-turn navigation bridge and companion app for compatible Bajaj motorcycles (OTC Engineering BLE & TFT clusters).
 
-[![Download Latest APK](https://img.shields.io/github/v/release/Az-har/pulsarnav?label=Download%20APK&logo=android)](https://github.com/Az-har/pulsarnav/releases/latest)
+[![Download Latest APK](https://img.shields.io/github/v/release/nikhilmaity00/pulsarnav?label=Download%20APK&logo=android)](https://github.com/nikhilmaity00/pulsarnav/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![API](https://img.shields.io/badge/API-26%2B%20(Android%208.0%2B)-brightgreen.svg)](https://android-arsenal.com/api?level=26)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.22-blue.svg)](https://kotlinlang.org)
@@ -11,46 +11,28 @@ Turn-by-turn navigation bridge and companion app for Bajaj Pulsar and Dominar mo
 
 ---
 
-## The "Best of Both Worlds" Architecture
+## Quick Setup (LCD vs. TFT)
 
-You don't have to choose between Google Maps' live traffic accuracy and a clean motorcycle cluster. PulsarNav seamlessly bridges both worlds:
+On first launch (and anytime under **Account → My Bike → Setup**), PulsarNav asks for your bike model, region, preferred navigation app (**Google Maps** or **Waze**), and **Instrument Cluster Display** type:
 
-```
-[Google Maps / Waze on Your Phone]
-  ├── Live destination search, real-time traffic, voice directions & rerouting
-  └── Started navigation
-           │
-           ▼
-[PulsarNav Interceptor (Notification Listener)]
-  └── Grabs real-time turn maneuver, street name, distance countdown, and ETA
-           │
-           ├──────────────────────────────────────────────┐
-           ▼                                              ▼
-[BLE GATT OTC Telematics (48 Bytes)]            [Wi-Fi SoftAP Mirroring (800×480)]
-  ├── Bottom LCD / BLE Bar                        ├── TFT Screen: 800×480 Live Map
-  │   - Maneuver arrow icon                       │   - Offline slippy map tiles + OSRM route
-  │   - Distance countdown (meters / km)          │   - Lock-proof headless Canvas rendering
-  │   - ETA clock (AM/PM)                         │   - Vehicle cursor offset from tachometer
-  │   - Street name transliterated to ASCII       │   - Deep Cerulean daylight contrast (ISO 15008)
-  └── Automatic segment blinking for LCD          └── Optional Google Maps live screen cast
-```
+- **Segmented LCD**: Shows BLE turn-by-turn navigation, call/WhatsApp/SMS alerts, fuel/service logs, and the BLE/roundabout simulator—while cleanly hiding all TFT-only Wi-Fi Live Map, Phonebook Sync, and 800×480 debugger cards.
+- **Color TFT**: Unlocks BLE telematics plus 800×480 Wi-Fi Live Map, Screen Cast, HUD Mirror, and Starred Contacts / Recent Calls sync.
+- **Auto-Detect**: Probes cluster capabilities over BLE GATT and adapts automatically.
+
+Non-blocking top-bar status badges (**BT OFF**, **GPS OFF**, **PERMS**) alert you on all Android versions when Bluetooth, Location, or permissions are disabled, without blocking you from launching navigation.
 
 ---
 
-## Supported Bikes
+## Compatibility
 
-PulsarNav features universal cluster auto-detection (`ClusterHardwareType`) with automatic protocol escalation and manual console overrides:
+> **Important Compatibility Notice:** Compatibility **varies based on the exact instrument cluster hardware and firmware fitted on your Bajaj motorcycle**, even within the same model line or year. Only clusters built on the **OTC Engineering Bluetooth LE / Wi-Fi telematics platform** (Bajaj Ride Connect hardware) are supported. Non-Bluetooth clusters or newer/regional cluster revisions with different protocols are not guaranteed to work.
 
-| Model | Cluster Type | BLE Turn-by-Turn | Handlebar Controls & Calls | Wi-Fi 800×480 Mirroring |
+| Reference Bike | Cluster Type | BLE Turn-by-Turn | Handlebar Controls & Calls | Wi-Fi 800×480 Mirroring |
 | :--- | :--- | :---: | :---: | :---: |
-| **Bajaj Pulsar NS400Z** (2024+) | `TFT_COLOR_ONLY` (5" 800×480) | ✅ (Direct Opcode) | ✅ (Calls, Starred 0910, Logs 0b10, Music) | ✅ (Live Map + Screen Cast) |
-| **Bajaj Pulsar NS200** (2024+ digital) | `DUAL_LCD_OR_TFT` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | Optional (TFT variant) |
-| **Bajaj Pulsar N250 / F250** | `DUAL_LCD_OR_TFT` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | Optional (TFT variant) |
-| **Bajaj Pulsar N160 / NS160** | `DUAL_LCD_OR_TFT` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | — |
-| **Bajaj Dominar 400** | `DUAL_LCD_OR_TFT` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | Optional (TFT variant) |
-| **Bajaj Dominar 250** | `LCD_MONOCHROME_ONLY` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | — |
-| **Bajaj Pulsar 150 / 125** | `LCD_MONOCHROME_ONLY` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts) | — |
-| **Bajaj Rouser Series** (LatAm) | `DUAL_LCD_OR_TFT` | ✅ (Hardware Blink) | ✅ (Call ID, Alerts, Media) | — |
+| **Bajaj Pulsar NS200** | Segmented LCD (OTC BLE) | ✅ (with `<100m` hardware blink) | ✅ (Caller ID, WhatsApp/SMS alerts, media controls) | — |
+| **Bajaj Pulsar NS400Z** | Color TFT (5" 800×480) | ✅ (Direct opcode) | ✅ (Calls, Starred `0910`, Recent Calls `0b10`, Music `0610`/`0510`) | ✅ (Live Map + Screen Cast) |
+
+*Other Bajaj bikes equipped with the identical OTC Engineering Segmented LCD or Color TFT cluster may work using **Auto-Detect** (or by selecting **Segmented LCD** / **Color TFT** in Setup), depending on the cluster hardware and firmware installed on that specific bike.*
 
 ---
 
@@ -76,11 +58,12 @@ PulsarNav features universal cluster auto-detection (`ClusterHardwareType`) with
 - **Media Controls & Playlist Browsing**: View track metadata and album artwork via `0610` Music Info and browse pages of tracks via `0510` Playlist frames.
 - **Take Me Home Shortcut**: Echoes the TFT `takeMeHome` cluster trigger directly into Google Maps or Waze for instant homeward routing.
 
-### 4. Vehicle Ledger & Privacy Vault
-- **Maintenance Reminders**: Tracks odometer readings, 500 km chain cleaning schedules, and periodic engine oil services.
-- **Fuel Economy Ledger**: Computes real km/L consumption and fuel expenses with multi-currency support (₹, $, £, €, ₺, etc.).
-- **Digital Glovebox**: Stores offline digital copies of your Registration Certificate (RC), Insurance, and PUC certificates.
+### 4. Vehicle Ledger, Repair Checklist & Privacy Vault
+- **Fuel Economy Ledger**: Log refills with custom refill dates (for backdating bills on add/edit), true chronological tank-to-tank km/L calculation, multi-currency support (`₹`, `$`, `£`, `€`, `₺`, etc.), and sorting by Date (newest/oldest), Odometer, Amount, or Mileage.
+- **Maintenance & Repair Checklist**: Tracks odometer readings, 500 km chain lube intervals, periodic engine oil services, and a **Bike Issues & Repair Checklist** where symptoms can be added, edited, checked off, or removed.
+- **Digital Glovebox**: Stores offline digital copies and expiry tracking for your Registration Certificate (RC), Insurance, and PUC certificates.
 - **Encrypted `.pnav` Backups**: AES-256-GCM encryption with PBKDF2 key derivation for offline backups and QR code device transfer.
+- **Cluster Diagnostics & Safety**: Non-blocking hardware readiness chips (**BT OFF**, **GPS OFF**, **PERMS**), custom OLED/light themes, and a built-in BLE/roundabout test simulator + redacted Log Console.
 
 ---
 
@@ -165,7 +148,7 @@ PulsarNav communicates with the cluster via custom 128-bit OTC Engineering UUIDs
 ### Compile & Run Tests
 ```bash
 # Clone the repository
-git clone https://github.com/Az-har/pulsarnav.git
+git clone https://github.com/nikhilmaity00/pulsarnav.git
 cd pulsarnav
 
 # Run full compilation, unit test suites, and Android Lint
@@ -180,7 +163,7 @@ The compiled APK will be located at `app/build/outputs/apk/release/app-release.a
 
 ## Contributing
 
-Contributions from the motorcycle community are warmly welcomed! Whether you are testing on another Bajaj or Rouser model, adding a new regional language transliteration, or improving map rendering heuristics:
+Contributions from the motorcycle community are warmly welcomed! Whether you are testing on another Bajaj instrument cluster, adding a new regional language transliteration, or improving map rendering heuristics:
 
 1. Fork the repository and create your feature branch (`git checkout -b feature/my-feature`).
 2. Verify that all unit tests and Android Lint pass cleanly (`./gradlew testDebugUnitTest lintDebug`).
