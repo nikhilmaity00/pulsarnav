@@ -133,7 +133,7 @@
                         android:background="@drawable/pill_badge"
                         android:paddingHorizontal="10dp"
                         android:paddingVertical="4dp"
-                        android:text="Model"
+                        android:text="Setup"
                         android:textColor="@color/wine_red_light"
                         android:textSize="11sp"
                         android:textStyle="bold" />

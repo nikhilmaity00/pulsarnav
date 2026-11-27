@@ -52,9 +52,12 @@ class NavigationHubController(
     private val createThemedEditText: (String?, String?, Int?) -> EditText,
     private val isWifiEnabled: () -> Boolean,
     private val isLocationEnabled: () -> Boolean,
+    private val isTftUiEnabled: () -> Boolean,
     private val promptEnableWifiForConfig: (onReady: () -> Unit) -> Unit,
     private val isNotificationAccessGranted: () -> Boolean,
     private val onLaunchGoogleMapsRide: () -> Unit,
+    private val onLaunchNavigationDestination: (String) -> Unit,
+    private val onConsoleTypeChanged: () -> Unit,
     private val onHaptic: () -> Unit,
     private val onFeedback: (String, Boolean) -> Unit
 ) {
@@ -311,6 +314,7 @@ class NavigationHubController(
                 appSettings.isTftCastAlignLeftEnabled = cbAlignLeft.isChecked
                 appSettings.isTftCastForceLandscapeEnabled = cbForceLandscape.isChecked
                 TftWifiMirrorManager.getInstance(activity).switchHeadlessModeIfActive(nextMode)
+                onConsoleTypeChanged()
                 if (!isWifiEnabled()) {
                     onFeedback("TFT settings saved • Remember to turn on Wi-Fi before casting", true)
                 } else {
@@ -338,7 +342,21 @@ class NavigationHubController(
             appSettings.getActiveBikeProfile(),
             appSettings.getActiveCountryProfile()
         )
-        sheetBinding.tvNavHubSubtitle.text = "$bikeName 800×480 Live Map & Cluster TBT"
+        val tftEnabled = isTftUiEnabled()
+        if (tftEnabled) {
+            sheetBinding.tvNavHubTitle.text = "TFT Motorcycle Navigation"
+            sheetBinding.tvNavHubSubtitle.text = "$bikeName 800×480 Live Map & Cluster TBT"
+            sheetBinding.btnStartTftRoute.visibility = View.VISIBLE
+        } else {
+            sheetBinding.tvNavHubTitle.text = "Motorcycle Navigation"
+            sheetBinding.tvNavHubSubtitle.text = "$bikeName Turn-by-Turn & Quick Destinations"
+            sheetBinding.btnStartTftRoute.visibility = View.GONE
+            sheetBinding.btnLaunchGoogleMaps.text = if (appSettings.preferredNavApp == AppSettings.NAV_APP_WAZE) {
+                "Start Waze Navigation"
+            } else {
+                "Start Google Maps"
+            }
+        }
 
         sheetBinding.ivDismissNavHub.setOnClickListener { dialog.dismiss() }
 
@@ -447,7 +465,12 @@ class NavigationHubController(
                         setOnClickListener {
                             sheetBinding.etNavDestination.setText(dest.name)
                             sheetBinding.etNavDestination.setSelection(dest.name.length)
-                            performStartRoute(dest.name)
+                            if (tftEnabled) {
+                                performStartRoute(dest.name)
+                            } else {
+                                onLaunchNavigationDestination(dest.name)
+                                dialog.dismiss()
+                            }
                         }
                     }
                     val icon = ImageView(activity).apply {
@@ -484,32 +507,41 @@ class NavigationHubController(
         }
         refreshRecentList()
 
+        fun startForActiveCluster(query: String) {
+            if (tftEnabled) {
+                performStartRoute(query)
+            } else {
+                onLaunchNavigationDestination(query)
+                dialog.dismiss()
+            }
+        }
+
         sheetBinding.chipNavHome.setOnClickListener {
             val addr = appSettings.homeAddress.ifBlank { "Home" }
             sheetBinding.etNavDestination.setText(addr)
             sheetBinding.etNavDestination.setSelection(sheetBinding.etNavDestination.text.length)
-            if (addr != "Home") performStartRoute(addr)
+            if (addr != "Home" || !tftEnabled) startForActiveCluster(addr)
         }
         sheetBinding.chipNavWork.setOnClickListener {
             val addr = appSettings.workAddress.ifBlank { "Work" }
             sheetBinding.etNavDestination.setText(addr)
             sheetBinding.etNavDestination.setSelection(sheetBinding.etNavDestination.text.length)
-            if (addr != "Work") performStartRoute(addr)
+            if (addr != "Work" || !tftEnabled) startForActiveCluster(addr)
         }
         sheetBinding.chipNavPetrol.setOnClickListener {
             sheetBinding.etNavDestination.setText("Petrol Pump")
             sheetBinding.etNavDestination.setSelection(sheetBinding.etNavDestination.text.length)
-            performStartRoute("Petrol Pump")
+            startForActiveCluster("Petrol Pump")
         }
         sheetBinding.chipNavHospital.setOnClickListener {
             sheetBinding.etNavDestination.setText("Hospital")
             sheetBinding.etNavDestination.setSelection(sheetBinding.etNavDestination.text.length)
-            performStartRoute("Hospital")
+            startForActiveCluster("Hospital")
         }
         sheetBinding.chipNavService.setOnClickListener {
             sheetBinding.etNavDestination.setText("Bajaj Service Center")
             sheetBinding.etNavDestination.setSelection(sheetBinding.etNavDestination.text.length)
-            performStartRoute("Bajaj Service Center")
+            startForActiveCluster("Bajaj Service Center")
         }
 
         sheetBinding.btnStartTftRoute.setOnClickListener {
@@ -519,7 +551,7 @@ class NavigationHubController(
 
         sheetBinding.etNavDestination.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_SEARCH) {
-                performStartRoute(sheetBinding.etNavDestination.text.toString())
+                startForActiveCluster(sheetBinding.etNavDestination.text.toString())
                 true
             } else false
         }
@@ -527,19 +559,8 @@ class NavigationHubController(
         sheetBinding.btnLaunchGoogleMaps.setOnClickListener {
             val q = sheetBinding.etNavDestination.text.toString().trim()
             if (q.isNotBlank()) {
-                if (!isLocationEnabled()) {
-                    onFeedback("GPS is OFF — turn ON Location for live navigation tracking", true)
-                }
-                val gmmIntentUri = Uri.parse("google.navigation:q=" + Uri.encode(q))
-                val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
-                    setPackage("com.google.android.apps.maps")
-                }
-                try {
-                    activity.startActivity(mapIntent)
-                    dialog.dismiss()
-                } catch (_: Exception) {
-                    onLaunchGoogleMapsRide()
-                }
+                onLaunchNavigationDestination(q)
+                dialog.dismiss()
             } else {
                 onLaunchGoogleMapsRide()
                 dialog.dismiss()
@@ -569,6 +590,7 @@ class NavigationHubController(
         val diag = GoogleMapsNotificationListener.diagnostics.value
         val activeRoute = TftNavigationMapEngine.getInstance(activity).uiState.value
 
+        val tftEnabled = isTftUiEnabled()
         val statusLines = buildString {
             append("• Notification Access: ${if (granted) "GRANTED" else "MISSING"}\n")
             append("• Listener Service: ${if (diag.isConnected) "CONNECTED" else "DISCONNECTED"}\n")
@@ -582,10 +604,12 @@ class NavigationHubController(
             append("\nIf Google Maps is in mini PiP window with NO notification in the top shade (common on ColorOS / OxygenOS / RealmeUI):\n")
             append("1. Tap \"Maps Notifs\" below and turn ON Notifications -> \"Navigation\".\n")
             append("2. Tap \"Maps Battery\" and set to Unrestricted / Allow background activity.\n")
-            append("3. Or inside Google Maps, tap Share -> PulsarNav to route directly on our 800×480 Live Map (works locked & needs zero Maps notification).")
+            if (tftEnabled) {
+                append("3. Or inside Google Maps, tap Share -> PulsarNav to route directly on our 800×480 Live Map (works locked & needs zero Maps notification).")
+            }
         }
 
-        MaterialAlertDialogBuilder(activity)
+        val builder = MaterialAlertDialogBuilder(activity)
             .setTitle("Google Maps TBT Diagnostics")
             .setMessage(statusLines)
             .setPositiveButton("Maps Notifs") { _, _ ->
@@ -594,10 +618,14 @@ class NavigationHubController(
             .setNeutralButton("Maps Battery") { _, _ ->
                 openAppDetailsSettings("com.google.android.apps.maps")
             }
-            .setNegativeButton("Route in App") { _, _ ->
+        if (tftEnabled) {
+            builder.setNegativeButton("Route in App") { _, _ ->
                 showNavigationHubBottomSheet()
             }
-            .show()
+        } else {
+            builder.setNegativeButton("Close", null)
+        }
+        builder.show()
     }
 
     private fun openAppNotificationSettings(targetPackage: String) {

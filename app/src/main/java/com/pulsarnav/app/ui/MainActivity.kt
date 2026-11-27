@@ -70,9 +70,11 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pulsarnav.app.R
 import com.pulsarnav.app.ble.BajajBleManager
 import com.pulsarnav.app.ble.BleConnectionState
+import com.pulsarnav.app.ble.BleProtocolSafety
 import com.pulsarnav.app.ble.DiscoveredBike
 import com.pulsarnav.app.data.AppSettings
 import com.pulsarnav.app.data.BikeIssue
+import com.pulsarnav.app.data.ClusterHardwareType
 import com.pulsarnav.app.databinding.ActivityMainBinding
 import com.pulsarnav.app.debug.DebugLogRepository
 import com.pulsarnav.app.location.ParkingManager
@@ -463,9 +465,12 @@ class MainActivity : AppCompatActivity() {
             createThemedEditText = { hint, initial, inputType -> createThemedEditText(hint, initial, inputType) },
             isWifiEnabled = { isWifiEnabled() },
             isLocationEnabled = { isLocationEnabled() },
+            isTftUiEnabled = { shouldShowTftUi() },
             promptEnableWifiForConfig = { onReady -> promptEnableWifi(PendingWifiActionType.CONFIG_DIALOG, onReady) },
             isNotificationAccessGranted = { isNotificationAccessGranted() },
             onLaunchGoogleMapsRide = { launchGoogleMapsRide() },
+            onLaunchNavigationDestination = { destination -> launchNavigationTo(destination) },
+            onConsoleTypeChanged = { updateBikeInfoDisplay() },
             onHaptic = { provideHapticFeedback() },
             onFeedback = { msg, isAlert -> showFeedback(msg, isAlert = isAlert) }
         )
@@ -867,16 +872,60 @@ class MainActivity : AppCompatActivity() {
         updateSyncTimeDisplay()
     }
 
+    private fun shouldShowTftUi(): Boolean {
+        val model = appSettings.getActiveBikeProfile()
+        val bleState = bleManager.connectionState.value
+        val isBleConnected = bleState is BleConnectionState.Connected
+        val connectedIsTft = if (isBleConnected) bleManager.isConnectedToTftCluster() else false
+        return BleProtocolSafety.shouldShowTftFeatures(
+            userOverride = appSettings.clusterConsoleType,
+            isModelLcdOnly = model.clusterType == ClusterHardwareType.LCD_MONOCHROME_ONLY,
+            isBleConnected = isBleConnected,
+            connectedIsTft = connectedIsTft
+        )
+    }
+
+    private fun updateClusterFeatureVisibility() {
+        val showTft = shouldShowTftUi()
+        val tftVis = if (showTft) View.VISIBLE else View.GONE
+        binding.tabCockpit.cardTftWifiMirror.visibility = tftVis
+        binding.tabAccount.labsTftDebug.cardTftScreenDebugger.visibility = tftVis
+        binding.tabAccount.labsTftDebug.btnLogFilterWifi.visibility = tftVis
+        binding.tabAccount.btnSyncPhonebookCalls.visibility = tftVis
+
+        if (!showTft) {
+            val wifiMgr = TftWifiMirrorManager.getInstance(this)
+            if (wifiMgr.isLocalPreviewActiveFlow.value) {
+                wifiMgr.stopLocalDebugPreview()
+            }
+            if (appSettings.clusterConsoleType == AppSettings.CLUSTER_CONSOLE_LCD) {
+                val mirrorStatus = wifiMgr.mirrorState.value.status
+                if (mirrorStatus != TftMirrorStatus.IDLE && mirrorStatus != TftMirrorStatus.ERROR) {
+                    BikeBleForegroundService.stopTftMirror(this)
+                }
+            }
+            if (!TftNavigationMapEngine.getInstance(this).hasActiveTbtOwner()) {
+                binding.tabCockpit.cardActiveTftNavigation.visibility = View.GONE
+            }
+        }
+    }
+
     private fun updateBikeInfoDisplay() {
         val model = appSettings.getActiveBikeProfile()
         val country = appSettings.getActiveCountryProfile()
         val localizedName = VehicleCatalog.getLocalizedBikeName(model, country)
+        val consoleLabel = when (appSettings.clusterConsoleType) {
+            AppSettings.CLUSTER_CONSOLE_LCD -> "Segmented LCD"
+            AppSettings.CLUSTER_CONSOLE_TFT -> "Color TFT"
+            else -> if (model.clusterType == ClusterHardwareType.LCD_MONOCHROME_ONLY) "LCD" else "Auto Display"
+        }
 
         binding.tabAccount.tvBikeName.text = localizedName
         val reg = if (appSettings.bikeRegNumber.isNotBlank()) appSettings.bikeRegNumber else "Add Number Plate"
-        binding.tabAccount.tvBikeReg.text = "$reg • ${country.labelTag} ${country.name}"
+        binding.tabAccount.tvBikeReg.text = "$reg • ${country.labelTag} ${country.name} • $consoleLabel"
         binding.tabAccount.tvProfileName.text = appSettings.riderName.ifBlank { "Rider Profile" }
         binding.tabFuel.tvTankSpecs.text = "${formatDecimal(model.tankCapacityLiters)}L Tank Capacity • ${formatDecimal(model.reserveCapacityLiters)}L Res"
+        updateClusterFeatureVisibility()
     }
 
     private fun updateDocumentsSummary() {
@@ -3094,6 +3143,7 @@ class MainActivity : AppCompatActivity() {
         updateBikeIssuesSummary()
         updateEmergencyHomeCard()
         updateQuickNavButtons()
+        updateClusterFeatureVisibility()
         updateTelephonyPermissionsUi()
         updateSmsRejectUi()
         applyTheme(appSettings.appTheme)
@@ -3959,6 +4009,10 @@ class MainActivity : AppCompatActivity() {
 
         val spinnerCountry = sheetView.findViewById<Spinner>(R.id.spinnerCountry)
         val spinnerModel = sheetView.findViewById<Spinner>(R.id.spinnerModel)
+        val btnClusterLcd = sheetView.findViewById<MaterialButton>(R.id.btnClusterLcd)
+        val btnClusterTft = sheetView.findViewById<MaterialButton>(R.id.btnClusterTft)
+        val btnClusterAuto = sheetView.findViewById<MaterialButton>(R.id.btnClusterAuto)
+        val tvClusterTypeHint = sheetView.findViewById<TextView>(R.id.tvClusterTypeHint)
         val btnNavGmaps = sheetView.findViewById<MaterialButton>(R.id.btnNavGoogleMaps)
         val btnNavWaze = sheetView.findViewById<MaterialButton>(R.id.btnNavWaze)
         val tvPreviewTitle = sheetView.findViewById<TextView>(R.id.tvPreviewTitle)
@@ -3996,26 +4050,70 @@ class MainActivity : AppCompatActivity() {
         }.coerceAtLeast(0)
         spinnerModel?.setSelection(activeModelIndex)
 
+        // Setup Cluster Console Type (LCD vs TFT vs Auto)
+        var selectedConsoleType = if (appSettings.isSetupCompleted) {
+            appSettings.clusterConsoleType
+        } else {
+            val initialModel = VehicleCatalog.MODELS[activeModelIndex]
+            when (initialModel.clusterType) {
+                ClusterHardwareType.TFT_COLOR_ONLY -> AppSettings.CLUSTER_CONSOLE_TFT
+                ClusterHardwareType.LCD_MONOCHROME_ONLY -> AppSettings.CLUSTER_CONSOLE_LCD
+                ClusterHardwareType.DUAL_LCD_OR_TFT -> appSettings.clusterConsoleType
+            }
+        }
+        var hasManuallyPickedConsole = appSettings.isSetupCompleted
+
+        fun styleOptionButton(btn: MaterialButton?, active: Boolean) {
+            if (active) {
+                btn?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
+                btn?.setTextColor(currentTheme.accentColor)
+                btn?.strokeColor = ColorStateList.valueOf(currentTheme.accentColor)
+            } else {
+                btn?.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_card))
+                btn?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+                btn?.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_border))
+            }
+        }
+
+        fun updateClusterButtons() {
+            styleOptionButton(btnClusterLcd, selectedConsoleType == AppSettings.CLUSTER_CONSOLE_LCD)
+            styleOptionButton(btnClusterTft, selectedConsoleType == AppSettings.CLUSTER_CONSOLE_TFT)
+            styleOptionButton(btnClusterAuto, selectedConsoleType == AppSettings.CLUSTER_CONSOLE_AUTO)
+            tvClusterTypeHint?.text = when (selectedConsoleType) {
+                AppSettings.CLUSTER_CONSOLE_LCD ->
+                    "Segmented LCD mode — shows BLE turn-by-turn & calls and hides unused 2026 TFT Wi-Fi features."
+                AppSettings.CLUSTER_CONSOLE_TFT ->
+                    "Color TFT mode — unlocks 800×480 Wi-Fi Live Map, HUD Mirror, Cast & Phonebook sync."
+                else ->
+                    "Auto-Detect — shows TFT features when available and adapts once connected over BLE."
+            }
+        }
+        updateClusterButtons()
+
+        btnClusterLcd?.setOnClickListener {
+            provideHapticFeedback()
+            hasManuallyPickedConsole = true
+            selectedConsoleType = AppSettings.CLUSTER_CONSOLE_LCD
+            updateClusterButtons()
+        }
+        btnClusterTft?.setOnClickListener {
+            provideHapticFeedback()
+            hasManuallyPickedConsole = true
+            selectedConsoleType = AppSettings.CLUSTER_CONSOLE_TFT
+            updateClusterButtons()
+        }
+        btnClusterAuto?.setOnClickListener {
+            provideHapticFeedback()
+            hasManuallyPickedConsole = true
+            selectedConsoleType = AppSettings.CLUSTER_CONSOLE_AUTO
+            updateClusterButtons()
+        }
+
         // Setup Nav App Selection
         var selectedNavApp = appSettings.preferredNavApp
         fun updateNavAppButtons() {
-            if (selectedNavApp == AppSettings.NAV_APP_WAZE) {
-                btnNavWaze?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-                btnNavWaze?.setTextColor(currentTheme.accentColor)
-                btnNavWaze?.strokeColor = ColorStateList.valueOf(currentTheme.accentColor)
-
-                btnNavGmaps?.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_card))
-                btnNavGmaps?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
-                btnNavGmaps?.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_border))
-            } else {
-                btnNavGmaps?.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
-                btnNavGmaps?.setTextColor(currentTheme.accentColor)
-                btnNavGmaps?.strokeColor = ColorStateList.valueOf(currentTheme.accentColor)
-
-                btnNavWaze?.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_card))
-                btnNavWaze?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
-                btnNavWaze?.strokeColor = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.surface_border))
-            }
+            styleOptionButton(btnNavGmaps, selectedNavApp != AppSettings.NAV_APP_WAZE)
+            styleOptionButton(btnNavWaze, selectedNavApp == AppSettings.NAV_APP_WAZE)
         }
         updateNavAppButtons()
 
@@ -4048,14 +4146,30 @@ class MainActivity : AppCompatActivity() {
             tvPreviewSos?.text = "${country.sosNumber} (${country.name} SOS)"
         }
 
-        val listener = object : AdapterView.OnItemSelectedListener {
+        var ignoreInitialModelSelect = true
+        spinnerCountry?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long) {
                 refreshPreview()
             }
             override fun onNothingSelected(p0: AdapterView<*>?) {}
         }
-        spinnerCountry?.onItemSelectedListener = listener
-        spinnerModel?.onItemSelectedListener = listener
+        spinnerModel?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long) {
+                if (ignoreInitialModelSelect) {
+                    ignoreInitialModelSelect = false
+                } else if (!hasManuallyPickedConsole) {
+                    val mIdx = (spinnerModel.selectedItemPosition).coerceIn(0, VehicleCatalog.MODELS.lastIndex)
+                    selectedConsoleType = when (VehicleCatalog.MODELS[mIdx].clusterType) {
+                        ClusterHardwareType.TFT_COLOR_ONLY -> AppSettings.CLUSTER_CONSOLE_TFT
+                        ClusterHardwareType.LCD_MONOCHROME_ONLY -> AppSettings.CLUSTER_CONSOLE_LCD
+                        ClusterHardwareType.DUAL_LCD_OR_TFT -> AppSettings.CLUSTER_CONSOLE_AUTO
+                    }
+                    updateClusterButtons()
+                }
+                refreshPreview()
+            }
+            override fun onNothingSelected(p0: AdapterView<*>?) {}
+        }
         refreshPreview()
 
         btnSave?.setOnClickListener {
@@ -4065,6 +4179,7 @@ class MainActivity : AppCompatActivity() {
             val country = VehicleCatalog.COUNTRIES[cIdx]
             val model = VehicleCatalog.MODELS[mIdx]
 
+            appSettings.clusterConsoleType = selectedConsoleType
             appSettings.applyBikeAndCountrySelection(model.id, country.code)
             appSettings.preferredNavApp = selectedNavApp
 
@@ -4073,7 +4188,12 @@ class MainActivity : AppCompatActivity() {
             updateQuickNavButtons()
             updateNavAppSelectionUi()
             val bikeDisplayName = VehicleCatalog.getLocalizedBikeName(model, country)
-            showFeedback("Configured for $bikeDisplayName (${country.name})")
+            val consoleTag = when (selectedConsoleType) {
+                AppSettings.CLUSTER_CONSOLE_LCD -> " • LCD"
+                AppSettings.CLUSTER_CONSOLE_TFT -> " • TFT"
+                else -> ""
+            }
+            showFeedback("Configured for $bikeDisplayName (${country.name}$consoleTag)")
             sheet.dismiss()
         }
 
@@ -4105,6 +4225,7 @@ class MainActivity : AppCompatActivity() {
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
                         binding.tvTopConnectionStatus.text = "OFFLINE"
                         binding.tvTopConnectionStatus.setTextColor(currentTheme.textTertiaryColor)
+                        updateClusterFeatureVisibility()
                     }
                     is BleConnectionState.Scanning -> {
                         startStatusDotPulse(binding.tabCockpit.viewStatusDot)
@@ -4154,7 +4275,7 @@ class MainActivity : AppCompatActivity() {
                         binding.tabCockpit.btnScan.backgroundTintList = ColorStateList.valueOf(currentTheme.subtleColor)
                         binding.tabCockpit.btnScan.setTextColor(currentTheme.accentColor)
                         binding.tabCockpit.rvDeviceList.visibility = View.GONE
-                        binding.tabAccount.btnSyncPhonebookCalls.visibility = if (isTft) View.VISIBLE else View.GONE
+                        updateClusterFeatureVisibility()
 
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
                         binding.tvTopConnectionStatus.text = if (isTft) "TFT CONNECTED" else "LCD CONNECTED"
@@ -4174,6 +4295,7 @@ class MainActivity : AppCompatActivity() {
                         binding.viewTopConnectionDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
                         binding.tvTopConnectionStatus.text = "OFFLINE"
                         binding.tvTopConnectionStatus.setTextColor(currentTheme.textTertiaryColor)
+                        updateClusterFeatureVisibility()
                     }
                 }
             }
@@ -4423,8 +4545,11 @@ class MainActivity : AppCompatActivity() {
                                         mapUi.remainingDistanceText.ifBlank { null },
                                         mapUi.remainingEtaText.ifBlank { null }
                                     ).joinToString(" • ")
-                                    binding.tabCockpit.tvActiveNavTripSummary.text = stats.ifBlank { "Active on TFT Cluster" }
-                                    binding.tabCockpit.tvActiveNavStatusBadge.text = "TFT LIVE"
+                                    val tftActive = shouldShowTftUi()
+                                    binding.tabCockpit.tvActiveNavTripSummary.text = stats.ifBlank {
+                                        if (tftActive) "Active on TFT Cluster" else "Active Turn-by-Turn"
+                                    }
+                                    binding.tabCockpit.tvActiveNavStatusBadge.text = if (tftActive) "TFT LIVE" else "BLE TBT"
                                 }
                             }
                         } else {

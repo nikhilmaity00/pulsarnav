@@ -10,6 +10,7 @@ import androidx.annotation.RequiresApi
 import com.pulsarnav.app.R
 import com.pulsarnav.app.ble.BajajBleManager
 import com.pulsarnav.app.ble.BleConnectionState
+import com.pulsarnav.app.data.AppSettings
 import com.pulsarnav.app.ui.MainActivity
 import com.pulsarnav.app.wifi.TftMirrorStatus
 import com.pulsarnav.app.wifi.TftWifiMirrorManager
@@ -51,6 +52,10 @@ class PulsarNavTileService : TileService() {
     @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
+        if (AppSettings.getInstance(this).clusterConsoleType == AppSettings.CLUSTER_CONSOLE_LCD) {
+            openMainActivityFromTile()
+            return
+        }
         val wifiMgr = TftWifiMirrorManager.getInstance(this)
         val currentStatus = wifiMgr.mirrorState.value.status
         val isStreaming = currentStatus == TftMirrorStatus.STREAMING ||
@@ -64,27 +69,41 @@ class PulsarNavTileService : TileService() {
             if (bleState is BleConnectionState.Connected) {
                 BikeBleForegroundService.startForTftCockpitMirror(this)
             } else {
-                val intent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    val pendingIntent = android.app.PendingIntent.getActivity(
-                        this,
-                        0,
-                        intent,
-                        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-                    )
-                    startActivityAndCollapse(pendingIntent)
-                } else {
-                    @Suppress("DEPRECATION")
-                    startActivityAndCollapse(intent)
-                }
+                openMainActivityFromTile()
             }
+        }
+    }
+
+    private fun openMainActivityFromTile() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            startActivityAndCollapse(pendingIntent)
+        } else {
+            @Suppress("DEPRECATION")
+            startActivityAndCollapse(intent)
         }
     }
 
     private fun updateTile(status: TftMirrorStatus) {
         val tile = qsTile ?: return
+        if (AppSettings.getInstance(this).clusterConsoleType == AppSettings.CLUSTER_CONSOLE_LCD) {
+            tile.state = Tile.STATE_INACTIVE
+            tile.label = "PulsarNav LCD"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tile.subtitle = "Open App"
+            }
+            tile.icon = Icon.createWithResource(this, R.drawable.ic_launcher)
+            tile.updateTile()
+            return
+        }
         when (status) {
             TftMirrorStatus.STREAMING -> {
                 tile.state = Tile.STATE_ACTIVE

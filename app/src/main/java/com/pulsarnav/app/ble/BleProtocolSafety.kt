@@ -179,4 +179,20 @@ object BleProtocolSafety {
         if (bondFailedForSession || bondState != BOND_STATE_BONDED) return false
         return negotiatedMtu >= MIN_TFT_READY_MTU
     }
+
+    /**
+     * Determines whether TFT-only Wi-Fi mirroring, Live Map, Debugger, and Phonebook Sync
+     * UI surfaces should be displayed. Explicit "lcd" or "tft" choices always win; in "auto"
+     * mode, an active BLE connection uses hardware truth while disconnected LCD-only bikes hide TFT UI.
+     */
+    fun shouldShowTftFeatures(
+        userOverride: String,
+        isModelLcdOnly: Boolean = false,
+        isBleConnected: Boolean = false,
+        connectedIsTft: Boolean = false
+    ): Boolean = when (userOverride) {
+        "lcd" -> false
+        "tft" -> true
+        else -> if (isBleConnected) connectedIsTft else !isModelLcdOnly
+    }
 }

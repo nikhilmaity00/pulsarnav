@@ -148,4 +148,54 @@ class BleProtocolSafetyTest {
         assertTrue(BleProtocolSafety.supportsPlaylistWrites(180))
         assertTrue(BleProtocolSafety.supportsPlaylistWrites(247))
     }
+
+    @Test
+    fun shouldShowTftFeatures_respectsExplicitLcdVsTftAndAutoHardwareTruth() {
+        assertFalse(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "lcd",
+                isModelLcdOnly = false,
+                isBleConnected = true,
+                connectedIsTft = true
+            )
+        )
+        assertTrue(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "tft",
+                isModelLcdOnly = true,
+                isBleConnected = false,
+                connectedIsTft = false
+            )
+        )
+        assertFalse(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "auto",
+                isModelLcdOnly = true,
+                isBleConnected = false
+            )
+        )
+        assertTrue(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "auto",
+                isModelLcdOnly = false,
+                isBleConnected = false
+            )
+        )
+        assertFalse(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "auto",
+                isModelLcdOnly = false,
+                isBleConnected = true,
+                connectedIsTft = false
+            )
+        )
+        assertTrue(
+            BleProtocolSafety.shouldShowTftFeatures(
+                userOverride = "auto",
+                isModelLcdOnly = true,
+                isBleConnected = true,
+                connectedIsTft = true
+            )
+        )
+    }
 }
