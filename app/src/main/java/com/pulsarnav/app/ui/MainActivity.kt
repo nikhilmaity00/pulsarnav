@@ -72,6 +72,7 @@ import com.pulsarnav.app.ble.BajajBleManager
 import com.pulsarnav.app.ble.BleConnectionState
 import com.pulsarnav.app.ble.DiscoveredBike
 import com.pulsarnav.app.data.AppSettings
+import com.pulsarnav.app.data.BikeIssue
 import com.pulsarnav.app.databinding.ActivityMainBinding
 import com.pulsarnav.app.debug.DebugLogRepository
 import com.pulsarnav.app.location.ParkingManager
@@ -388,6 +389,8 @@ class MainActivity : AppCompatActivity() {
             layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
             adapter = fuelListAdapter
         }
+        binding.tabFuel.btnSortFuel.text =
+            "Sort: ${FuelSortOrder.fromKey(appSettings.fuelSortOrder).shortLabel}"
 
         discoveredBikeAdapter = DiscoveredBikeAdapter(
             theme = currentTheme,
@@ -4860,7 +4863,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEditBikeIssueDialog(
-        issue: AppSettings.BikeIssue,
+        issue: BikeIssue,
         onSaved: () -> Unit
     ) {
         val layout = LinearLayout(this).apply {
